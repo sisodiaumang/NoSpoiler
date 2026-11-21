@@ -31,6 +31,7 @@
       match: /youtube\.com/,
       containers: [
         'ytd-rich-item-renderer',       // Individual home/channel video tile
+        'ytd-rich-grid-media',          // Modern grid media
         'ytd-video-renderer',           // Search result video
         'ytd-compact-video-renderer',   // Watch page sidebar related video
         'ytd-grid-video-renderer',      // Channel tab video
@@ -42,6 +43,7 @@
         'ytd-comment-view-model',       // Single comment
         'ytd-post-renderer',            // Community post
         'ytd-playlist-video-renderer',  // Playlist item
+        'ytd-playlist-panel-video-renderer', // Playlist drawer item
         'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-structured-description"]', // Shorts description panel
         'ytd-engagement-panel-section-list-renderer' // Engagement drawer
       ],
@@ -160,9 +162,9 @@
     const patterns = validKeywords.map(k => {
       const escaped = escapeRegExp(k);
       const flexible = escaped.replace(/\s+/g, '\\s+');
-      // Lookaround boundary checks: allows spaces, quotes, punctuation, brackets, but avoids URL slashes
-      const startBoundary = /^\w/.test(k) ? '(?<=^|[\\s"\'(\\[{<])' : '';
-      const endBoundary = /\w$/.test(k) ? '(?=$|[\\s"\'!?.,;:)}\\]>])' : '';
+      // Word boundary check: \b matches word boundaries accurately
+      const startBoundary = /^\w/.test(k) ? '\\b' : '';
+      const endBoundary = /\w$/.test(k) ? '\\b' : '';
       return `${startBoundary}(${flexible})${endBoundary}`;
     });
 
@@ -263,8 +265,8 @@
       const descPanel = element.closest('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-structured-description"], ytd-engagement-panel-section-list-renderer');
       if (descPanel && !element.closest('#comments, [target-id="engagement-panel-comments-section"]')) {
         const activeReel = document.querySelector('ytd-reel-video-renderer[is-active]') || document.querySelector('ytd-reel-video-renderer');
-        if (activeReel) {
-          inspectCard(activeReel);
+        if (activeReel && !activeReel.classList.contains('nospoiler-blurred')) {
+          blurElement(activeReel, element.textContent || 'Spoiler');
         }
         return descPanel;
       }
@@ -287,10 +289,10 @@
         } catch (_) {}
       }
 
-      // Fallback only to the direct title/block element containing the text (NEVER inside Shorts or drawers)
-      const tightBlock = element.closest('h1, h2, h3, h4, h5, h6, #video-title, p, a');
+      // Fallback only to the direct title/block element containing the text (NEVER inside Shorts, drawers, or thumbnails)
+      const tightBlock = element.closest('h1, h2, h3, h4, h5, h6, #video-title, p');
       if (tightBlock && isValidContainer(tightBlock)) {
-        if (element.closest('ytd-engagement-panel-section-list-renderer, ytd-reel-video-renderer, ytd-shorts')) {
+        if (element.closest('ytd-engagement-panel-section-list-renderer, ytd-reel-video-renderer, ytd-shorts, a#thumbnail, ytd-thumbnail')) {
           return null;
         }
         return tightBlock;
@@ -393,8 +395,9 @@
     container.setAttribute('data-nospoiler-blurred', 'true');
     container.setAttribute('data-nospoiler-theme', theme);
 
-    // Pause / Mute media if playing inside this specific card
-    if (settings.muteMedia) {
+    // Only mute/pause media in Shorts full player, NEVER pause static homepage video thumbnails
+    const isReel = container.tagName && container.tagName.toLowerCase() === 'ytd-reel-video-renderer';
+    if (settings.muteMedia && isReel) {
       const mediaElements = container.querySelectorAll('video, audio');
       mediaElements.forEach(media => {
         try {
@@ -528,20 +531,23 @@
     );
     container.classList.add('nospoiler-revealed');
 
-    // Resume media if it was playing before
-    if (settings.muteMedia) {
-      const mediaElements = container.querySelectorAll('video, audio');
-      mediaElements.forEach(media => {
-        try {
-          if (media.dataset.nospoilerWasUnmuted === 'true') {
-            media.muted = false;
-          }
-          if (media.dataset.nospoilerWasPlaying === 'true') {
-            media.play().catch(() => {});
-          }
-        } catch (_) {}
-      });
-    }
+    // Hide the overlay element completely so content is 100% visible
+    const overlay = container.querySelector('.nospoiler-overlay');
+    if (overlay) overlay.style.display = 'none';
+
+    // Resume video playback for Shorts
+    const mediaElements = container.querySelectorAll('video, audio');
+    mediaElements.forEach(media => {
+      try {
+        media.muted = false;
+        delete media.dataset.nospoilerWasUnmuted;
+        delete media.dataset.nospoilerWasPlaying;
+        const playPromise = media.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {});
+        }
+      } catch (_) {}
+    });
 
     // Attach small "Re-hide" button in corner
     let rehideBtn = container.querySelector('.nospoiler-rehide-btn');
@@ -558,6 +564,7 @@
         e.preventDefault();
         container.classList.remove('nospoiler-revealed');
         container.classList.add('nospoiler-blurred', `nospoiler-blur-${settings.blurIntensity}`);
+        if (overlay) overlay.style.display = 'flex';
       });
 
       container.appendChild(rehideBtn);
@@ -613,15 +620,73 @@
   function extractCardText(card) {
     if (!card) return '';
 
-    // Clone node so we can safely remove overlays and comments before reading textContent
-    const clone = card.cloneNode(true);
-    const ignores = clone.querySelectorAll(
-      '[data-nospoiler-ignore], .nospoiler-overlay, .nospoiler-rehide-btn, #comments, [target-id="engagement-panel-comments-section"]'
-    );
-    ignores.forEach(ig => ig.remove());
+    try {
+      const pieces = [];
 
-    const text = clone.textContent || '';
-    return cleanText(text).replace(/\s+/g, ' ');
+      // 1. Direct queries for all titles, headers, and attributed text
+      const titleEls = card.querySelectorAll(
+        '#video-title, [id*="video-title"], h1, h2, h3, h4, ' +
+        'yt-formatted-string, .yt-core-attributed-string, ' +
+        '.reel-player-header-headline, #headline, ' +
+        '[data-testid="tweetText"], [data-testid="post-title"], [slot="title"]'
+      );
+      titleEls.forEach(el => {
+        if (el.closest('[data-nospoiler-ignore="true"]') || el.closest('.nospoiler-overlay') || el.closest('.nospoiler-rehide-btn') || el.closest('#comments')) {
+          return;
+        }
+        const t = el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || '';
+        if (t.trim()) pieces.push(t.trim());
+      });
+
+      // 2. Thumbnail aria-labels & image alt tags (YouTube puts full title in a#thumbnail[aria-label])
+      const thumbEls = card.querySelectorAll('a#thumbnail, ytd-thumbnail, ytd-moving-thumbnail-renderer, img[alt]');
+      thumbEls.forEach(el => {
+        const aria = el.getAttribute('aria-label') || '';
+        const title = el.getAttribute('title') || '';
+        const alt = el.getAttribute('alt') || '';
+        const combined = `${aria} ${title} ${alt}`.trim();
+        if (combined) pieces.push(combined);
+      });
+
+      // 3. Channel names & descriptions
+      const metaEls = card.querySelectorAll(
+        'ytd-channel-name, #channel-name, .ytd-channel-name, ' +
+        '#description-text, #content-text, #description, [id*="description"], ' +
+        'ytd-video-meta-block'
+      );
+      metaEls.forEach(el => {
+        if (el.closest('[data-nospoiler-ignore="true"]') || el.closest('.nospoiler-overlay') || el.closest('.nospoiler-rehide-btn') || el.closest('#comments')) {
+          return;
+        }
+        const t = el.textContent || '';
+        if (t.trim()) pieces.push(t.trim());
+      });
+
+      // 4. TreeWalker on all live text nodes (skipping our overlays and comments)
+      const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT, {
+        acceptNode(n) {
+          const p = n.parentElement;
+          if (!p) return NodeFilter.FILTER_REJECT;
+          if (p.closest('[data-nospoiler-ignore="true"]') || p.closest('.nospoiler-overlay') || p.closest('.nospoiler-rehide-btn') || p.closest('#comments')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          const tag = p.tagName.toLowerCase();
+          if (['script', 'style', 'noscript', 'svg'].includes(tag)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+
+      let curr;
+      while ((curr = walker.nextNode())) {
+        const t = curr.textContent.trim();
+        if (t) pieces.push(t);
+      }
+
+      const raw = pieces.join(' ');
+      return cleanText(raw).replace(/\s+/g, ' ');
+    } catch (_) {
+      return '';
+    }
   }
 
   // Inspect a specific card element (handles YouTube Shorts recycling & infinite scroll)
