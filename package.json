@@ -1,0 +1,25 @@
+{
+  "name": "nospoiler-monorepo",
+  "version": "1.0.0",
+  "description": "NoSpoiler MERN & React Ecosystem - Chrome Extension, Next.js Dashboard & Express/MongoDB Backend (0% Python)",
+  "scripts": {
+    "server": "node --watch backend/server.js",
+    "dashboard": "npm --prefix dashboard run dev",
+    "extension:dev": "npm --prefix extension run dev",
+    "extension:build": "npm --prefix extension run build",
+    "build": "npm --prefix extension run build && npm --prefix dashboard run build"
+  },
+  "keywords": [
+    "mern",
+    "react",
+    "nextjs",
+    "chrome-extension",
+    "spoiler-blocker",
+    "gta-6",
+    "youtube",
+    "twitter",
+    "reddit"
+  ],
+  "author": "Antigravity",
+  "license": "MIT"
+}

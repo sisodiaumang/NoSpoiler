@@ -1,0 +1,206 @@
+/* NoSpoiler - Content Styles */
+
+/* Base container styling when blurred */
+.nospoiler-container {
+  position: relative !important;
+  overflow: hidden !important;
+  transition: filter 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Blur Intensities applied directly to content elements */
+.nospoiler-container.nospoiler-blurred > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
+  pointer-events: none !important;
+  user-select: none !important;
+  transition: filter 0.3s ease !important;
+}
+
+.nospoiler-container.nospoiler-blur-medium > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
+  filter: blur(12px) grayscale(50%) opacity(0.5) !important;
+}
+
+.nospoiler-container.nospoiler-blur-high > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
+  filter: blur(24px) grayscale(85%) opacity(0.35) !important;
+}
+
+.nospoiler-container.nospoiler-blur-blackout > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
+  filter: blur(35px) brightness(0.08) opacity(0.2) !important;
+}
+
+/* Fallback for elements without children (e.g. direct text node / simple block) */
+.nospoiler-direct-blur.nospoiler-blur-medium {
+  filter: blur(12px) grayscale(50%) !important;
+  user-select: none !important;
+}
+.nospoiler-direct-blur.nospoiler-blur-high {
+  filter: blur(24px) grayscale(85%) !important;
+  user-select: none !important;
+}
+.nospoiler-direct-blur.nospoiler-blur-blackout {
+  filter: blur(35px) brightness(0.08) !important;
+  user-select: none !important;
+}
+
+/* Frosted glass overlay that covers the blurred container */
+.nospoiler-overlay {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 48px !important;
+  z-index: 999999 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 12px !important;
+  box-sizing: border-box !important;
+  background: rgba(15, 23, 42, 0.82) !important;
+  backdrop-filter: blur(12px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(150%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: inherit !important;
+  cursor: pointer !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  color: #f8fafc !important;
+  animation: nospoilerFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Badge card inside overlay */
+.nospoiler-badge {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 10px 16px !important;
+  border-radius: 12px !important;
+  background: rgba(30, 41, 59, 0.9) !important;
+  border: 1px solid rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 20px rgba(99, 102, 241, 0.2) !important;
+  max-width: 90% !important;
+  text-align: center !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
+}
+
+.nospoiler-overlay:hover .nospoiler-badge {
+  transform: translateY(-1px) scale(1.02) !important;
+  border-color: rgba(129, 140, 248, 0.6) !important;
+  box-shadow: 0 14px 28px -5px rgba(0, 0, 0, 0.6), 0 0 25px rgba(99, 102, 241, 0.35) !important;
+}
+
+/* Badge Title Row */
+.nospoiler-badge-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em !important;
+  color: #e0e7ff !important;
+  line-height: 1.2 !important;
+}
+
+.nospoiler-badge-icon {
+  width: 16px !important;
+  height: 16px !important;
+  fill: #818cf8 !important;
+  flex-shrink: 0 !important;
+}
+
+/* Matched keyword label */
+.nospoiler-keyword-tag {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  background: rgba(99, 102, 241, 0.22) !important;
+  color: #c7d2fe !important;
+  padding: 2px 8px !important;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(129, 140, 248, 0.3) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 220px !important;
+}
+
+/* Action hint/button */
+.nospoiler-reveal-hint {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  color: #94a3b8 !important;
+  margin-top: 2px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.nospoiler-overlay:hover .nospoiler-reveal-hint {
+  color: #f1f5f9 !important;
+}
+
+/* Compact layout for small elements (e.g. comments, search snippets, shorts) */
+.nospoiler-overlay.nospoiler-compact {
+  padding: 4px !important;
+}
+
+.nospoiler-overlay.nospoiler-compact .nospoiler-badge {
+  flex-direction: row !important;
+  padding: 4px 10px !important;
+  gap: 8px !important;
+}
+
+.nospoiler-overlay.nospoiler-compact .nospoiler-reveal-hint {
+  margin-top: 0 !important;
+}
+
+/* Revealed State: overlay hidden, content clear */
+.nospoiler-container.nospoiler-revealed > *:not(.nospoiler-rehide-btn) {
+  filter: none !important;
+  pointer-events: auto !important;
+  user-select: auto !important;
+}
+
+.nospoiler-container.nospoiler-revealed .nospoiler-overlay {
+  display: none !important;
+}
+
+/* Floating Re-hide Button when revealed */
+.nospoiler-rehide-btn {
+  position: absolute !important;
+  top: 8px !important;
+  right: 8px !important;
+  z-index: 999999 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  background: rgba(15, 23, 42, 0.85) !important;
+  backdrop-filter: blur(8px) !important;
+  color: #cbd5e1 !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 9999px !important;
+  padding: 4px 10px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.2s ease !important;
+  opacity: 0.4 !important;
+}
+
+.nospoiler-container:hover .nospoiler-rehide-btn {
+  opacity: 1 !important;
+}
+
+.nospoiler-rehide-btn:hover {
+  background: #4f46e5 !important;
+  color: #ffffff !important;
+  border-color: #818cf8 !important;
+  transform: scale(1.04) !important;
+  opacity: 1 !important;
+}
+
+@keyframes nospoilerFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

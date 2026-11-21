@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NoSpoiler Extension - Test Playground</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #6366f1;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #6366f1, #a855f7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 15px;
+    }
+    .instructions-card {
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      padding: 16px 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .instructions-card strong {
+      color: #818cf8;
+    }
+    .feed-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-img {
+      width: 100%;
+      height: 160px;
+      background: #334155;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #64748b;
+      font-weight: bold;
+      font-size: 14px;
+    }
+    .card-content {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .card-tag {
+      font-size: 11px;
+      color: var(--accent);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.3;
+      margin: 0;
+    }
+    .card-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin: 0;
+    }
+    /* Simulated YouTube Video Card */
+    .yt-card {
+      display: flex;
+      gap: 16px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 12px;
+      border-radius: 12px;
+    }
+    .yt-thumb {
+      width: 200px;
+      height: 110px;
+      background: #1e1b4b;
+      border-radius: 8px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #818cf8;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .yt-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .yt-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .yt-channel {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    /* Simulated Tweet */
+    .tweet-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .tweet-author {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: #475569;
+    }
+    .author-info {
+      display: flex;
+      flex-direction: column;
+    }
+    .author-name {
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .author-handle {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .tweet-text {
+      font-size: 14px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🛡️ NoSpoiler Test Playground</h1>
+      <p class="subtitle">Use this page to test the NoSpoiler Chrome extension on various types of posts & articles.</p>
+    </header>
+
+    <div class="instructions-card">
+      <strong>How to Test:</strong>
+      <ol style="margin-top: 8px; padding-left: 20px;">
+        <li>Load this extension into Chrome via <code>chrome://extensions</code> (Load unpacked).</li>
+        <li>Open the extension popup and ensure <strong>"gta 6"</strong> (or any other keyword) is in your filter list.</li>
+        <li>Notice how the posts and simulated video cards mentioning <strong>"GTA 6"</strong> below are automatically blurred with the spoiler badge!</li>
+        <li>Try clicking <strong>"Click to reveal"</strong> on a blurred card to unblur it.</li>
+        <li>Add a new keyword (e.g. <code>elden ring</code> or <code>avengers</code>) in the extension popup and watch this page react instantly!</li>
+      </ol>
+    </div>
+
+    <!-- YouTube-style Video Card (Has GTA 6 in title) -->
+    <article class="yt-card">
+      <div class="yt-thumb" role="img" aria-label="GTA 6 Trailer Breakdown">
+        🎬 Video Thumbnail
+      </div>
+      <div class="yt-meta">
+        <div class="yt-title" id="video-title">GTA 6 Official Gameplay Leaks & Map Breakdown! Everything We Know</div>
+        <div class="yt-channel" id="channel-name">Gaming Hub • 2.4M views • 2 hours ago</div>
+        <p class="card-desc">Deep dive into the latest Rockstar leaks, map size comparisons with Vice City, and all weapons confirmed.</p>
+      </div>
+    </article>
+
+    <!-- Normal Non-Spoiler Post (Should NOT be blurred) -->
+    <article class="card">
+      <div class="card-img">Nature Photography</div>
+      <div class="card-content">
+        <span class="card-tag">Photography</span>
+        <h3 class="card-title">Top 10 National Parks to Visit This Autumn</h3>
+        <p class="card-desc">Explore scenic mountain trails, golden foliage, and wildlife preserves across North America.</p>
+      </div>
+    </article>
+
+    <!-- Tweet / Post Card with GTA 6 Spoiler -->
+    <article class="tweet-card" data-testid="tweet">
+      <div class="tweet-author">
+        <div class="avatar"></div>
+        <div class="author-info">
+          <span class="author-name">Insider News</span>
+          <span class="author-handle">@GameLeaker</span>
+        </div>
+      </div>
+      <div class="tweet-text" data-testid="tweetText">
+        HUGE SPOILER: The ending of GTA 6 and the main storyline twist has just been leaked online by a former employee! Be careful what you read today. #GTA6 #Rockstar
+      </div>
+    </article>
+
+    <!-- Article Card with Elden Ring Spoiler -->
+    <article class="card">
+      <div class="card-img">Fantasy RPG</div>
+      <div class="card-content">
+        <span class="card-tag">Gaming</span>
+        <h3 class="card-title">Elden Ring DLC Final Boss Strategy Guide and Secret Ending</h3>
+        <p class="card-desc">Step-by-step walkthrough detailing how to defeat the final remembrance boss and discover the hidden cutscene.</p>
+      </div>
+    </article>
+
+    <!-- Generic Web Paragraph -->
+    <div class="card">
+      <div class="card-content">
+        <span class="card-tag">Tech & Entertainment</span>
+        <h3 class="card-title">Anticipated Releases for Next Year</h3>
+        <p class="card-desc">
+          Industry analysts predict that GTA VI will shatter all entertainment sales records upon its release, generating billions in its first weekend.
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

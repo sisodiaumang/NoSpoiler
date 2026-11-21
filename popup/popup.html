@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NoSpoiler Settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L4 5V11.09C4 16.14 7.41 20.85 12 22C16.59 20.85 20 16.14 20 11.09V5L12 2Z" fill="url(#grad)" />
+            <path d="M12 7V17M8 12H16" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+            <defs>
+              <linearGradient id="grad" x1="4" y1="2" x2="20" y2="22" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#6366F1" />
+                <stop offset="1" stop-color="#A855F7" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">NoSpoiler</span>
+          <span class="brand-subtitle">Smart Content Shield</span>
+        </div>
+      </div>
+      <label class="switch" title="Toggle NoSpoiler on/off">
+        <input type="checkbox" id="masterToggle" checked>
+        <span class="slider"></span>
+      </label>
+    </header>
+
+    <!-- Stats Banner -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <span class="stat-value" id="tabCount">0</span>
+        <span class="stat-label">On This Page</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value" id="totalCount">0</span>
+        <span class="stat-label">Total Blocked</span>
+      </div>
+    </div>
+
+    <!-- Keyword Input Section -->
+    <div class="card">
+      <div class="card-title">Block Keywords</div>
+      <form id="addKeywordForm" class="input-group">
+        <input 
+          type="text" 
+          id="keywordInput" 
+          placeholder="e.g. gta 6, spoilers, movie..." 
+          autocomplete="off"
+          maxlength="40"
+        />
+        <button type="submit" id="addBtn" class="btn btn-primary" title="Add keyword">
+          <span>+ Add</span>
+        </button>
+      </form>
+
+      <!-- Quick Suggestion Pills -->
+      <div class="suggestions-wrapper">
+        <span class="suggestion-label">Quick add:</span>
+        <div class="suggestion-pills">
+          <button type="button" class="pill-btn" data-preset="gta 6">+ GTA 6</button>
+          <button type="button" class="pill-btn" data-preset="gta vi">+ GTA VI</button>
+          <button type="button" class="pill-btn" data-preset="avengers">+ Avengers</button>
+          <button type="button" class="pill-btn" data-preset="elden ring">+ Elden Ring</button>
+        </div>
+      </div>
+
+      <!-- Keywords List -->
+      <div class="keywords-container">
+        <div class="keywords-header">
+          <span>Active Filter List (<span id="keywordCount">0</span>)</span>
+          <button type="button" id="clearAllBtn" class="btn-link" title="Remove all keywords">Clear all</button>
+        </div>
+        <div id="keywordList" class="keyword-tags">
+          <!-- Dynamically populated tags -->
+        </div>
+        <div id="emptyKeywordsState" class="empty-state" style="display: none;">
+          <p>No keywords added yet.</p>
+          <span>Add a keyword above to blur spoilers instantly across YouTube, Twitter/X, Reddit & the web.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings / Customization -->
+    <div class="card">
+      <div class="card-title">Blur Options</div>
+      
+      <!-- Blur Intensity -->
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Blur Intensity</span>
+          <span class="setting-desc">How heavily content is obscured</span>
+        </div>
+        <div class="segmented-control" id="blurSegmented">
+          <button type="button" class="segment-btn" data-value="medium">Medium</button>
+          <button type="button" class="segment-btn active" data-value="high">Strong</button>
+          <button type="button" class="segment-btn" data-value="blackout">Blackout</button>
+        </div>
+      </div>
+
+      <!-- Reveal on Click -->
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Click to Reveal</span>
+          <span class="setting-desc">Clicking blurred card shows content</span>
+        </div>
+        <label class="switch mini">
+          <input type="checkbox" id="revealToggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- Mute Autoplaying Video -->
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Mute Autoplaying Video</span>
+          <span class="setting-desc">Pauses videos inside blurred posts</span>
+        </div>
+        <label class="switch mini">
+          <input type="checkbox" id="muteToggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="status-indicator">
+        <span class="status-dot active" id="statusDot"></span>
+        <span class="status-text" id="statusText">Shield is active</span>
+      </div>
+      <button type="button" id="rescanBtn" class="btn btn-ghost" title="Rescan current tab now">
+        ↻ Rescan Page
+      </button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

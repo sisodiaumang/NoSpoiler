@@ -1,0 +1,68 @@
+:root {
+  --bg-dark: #0a0e17;
+  --surface: #111827;
+  --surface-alt: #1a2234;
+  --border: #1f293d;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --primary: #6366f1;
+  --primary-hover: #4f46e5;
+  --primary-glow: rgba(99, 102, 241, 0.35);
+  --gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  --success: #10b981;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* Blur Preview Effects in Simulator */
+.sim-blur-medium {
+  filter: blur(12px) grayscale(50%);
+  transition: filter 0.3s ease;
+}
+
+.sim-blur-high {
+  filter: blur(24px) grayscale(80%);
+  transition: filter 0.3s ease;
+}
+
+.sim-blur-blackout {
+  filter: blur(35px) brightness(0.1);
+  transition: filter 0.3s ease;
+}
+
+.sim-revealed {
+  filter: none !important;
+  transition: filter 0.3s ease;
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(168, 85, 247, 0.5);
+  }
+}
