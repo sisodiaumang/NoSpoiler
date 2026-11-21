@@ -248,6 +248,17 @@ ytd-reel-video-renderer.nospoiler-container .nospoiler-overlay {
   z-index: 50 !important;
 }
 
+/* YouTube Shorts description panel styling when blurred */
+ytd-engagement-panel-section-list-renderer.nospoiler-container {
+  position: relative !important;
+  overflow: hidden !important;
+  border-radius: 16px !important;
+}
+
+ytd-engagement-panel-section-list-renderer.nospoiler-container .nospoiler-overlay {
+  z-index: 50 !important;
+}
+
 @keyframes nospoilerFadeIn {
   from { opacity: 0; }
   to { opacity: 1; }

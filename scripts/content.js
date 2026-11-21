@@ -41,7 +41,9 @@
         'ytd-comment-thread-renderer',  // Individual comment thread
         'ytd-comment-view-model',       // Single comment
         'ytd-post-renderer',            // Community post
-        'ytd-playlist-video-renderer'   // Playlist item
+        'ytd-playlist-video-renderer',  // Playlist item
+        'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-structured-description"]', // Shorts description panel
+        'ytd-engagement-panel-section-list-renderer' // Engagement drawer
       ],
       // Elements that MUST NEVER be blurred as a whole
       blacklist: [
@@ -257,13 +259,19 @@
       const commentEl = element.closest('ytd-comment-view-model, ytd-comment-thread-renderer');
       if (commentEl) return commentEl;
 
-      // 2. Shorts video player: target the specific short reel renderer
+      // 2. Shorts description panel: if spoiler is inside description drawer, blur the drawer AND the active video player
+      const descPanel = element.closest('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-structured-description"], ytd-engagement-panel-section-list-renderer');
+      if (descPanel && !element.closest('#comments, [target-id="engagement-panel-comments-section"]')) {
+        const activeReel = document.querySelector('ytd-reel-video-renderer[is-active]') || document.querySelector('ytd-reel-video-renderer');
+        if (activeReel) {
+          inspectCard(activeReel);
+        }
+        return descPanel;
+      }
+
+      // 3. Shorts video player: target the full short container
       const reelVideo = element.closest('ytd-reel-video-renderer');
       if (reelVideo) {
-        // If it's inside comments engagement panel but not a single comment, ignore
-        if (element.closest('ytd-engagement-panel-section-list-renderer, #comments, #engagement-panel-comments-section')) {
-          return null;
-        }
         return reelVideo;
       }
     }
@@ -279,9 +287,12 @@
         } catch (_) {}
       }
 
-      // Fallback only to the direct title/block element containing the text:
+      // Fallback only to the direct title/block element containing the text (NEVER inside Shorts or drawers)
       const tightBlock = element.closest('h1, h2, h3, h4, h5, h6, #video-title, p, a');
       if (tightBlock && isValidContainer(tightBlock)) {
+        if (element.closest('ytd-engagement-panel-section-list-renderer, ytd-reel-video-renderer, ytd-shorts')) {
+          return null;
+        }
         return tightBlock;
       }
       return null;
@@ -551,6 +562,20 @@
 
       container.appendChild(rehideBtn);
     }
+
+    // Synchronize reveal between Shorts video player and its description drawer
+    const tag = container.tagName ? container.tagName.toLowerCase() : '';
+    if (tag === 'ytd-reel-video-renderer') {
+      const descPanel = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-structured-description"].nospoiler-blurred, ytd-engagement-panel-section-list-renderer.nospoiler-blurred');
+      if (descPanel) {
+        revealElement(descPanel);
+      }
+    } else if (tag === 'ytd-engagement-panel-section-list-renderer') {
+      const activeReel = document.querySelector('ytd-reel-video-renderer[is-active].nospoiler-blurred') || document.querySelector('ytd-reel-video-renderer.nospoiler-blurred');
+      if (activeReel) {
+        revealElement(activeReel);
+      }
+    }
   }
 
   // Remove blur completely from the entire page
@@ -577,72 +602,25 @@
   // Build a distinct signature for a YouTube Short video inside a ytd-reel-video-renderer
   function getShortSignature(card) {
     if (!card) return '';
-    const headline = card.querySelector('#headline, .reel-player-header-headline, h2.title, yt-formatted-string.title')?.textContent?.trim() || '';
-    const channel = card.querySelector('ytd-channel-name, #channel-name, .ytd-channel-name')?.textContent?.trim() || '';
     const video = card.querySelector('video');
     const videoSrc = video ? (video.currentSrc || video.src || '') : '';
     const cardId = card.getAttribute('id') || '';
-    return `${headline}__${channel}__${cardId}__${videoSrc.slice(-30)}`;
+    const textSnippet = extractCardText(card).slice(0, 120);
+    return `${cardId}__${videoSrc.slice(-30)}__${textSnippet}`;
   }
 
   // Extract clean text from a card without polluting with our own overlay or badge
   function extractCardText(card) {
     if (!card) return '';
-    let text = '';
 
-    if (currentPlatform && currentPlatform.name === 'youtube') {
-      const isReel = card.tagName.toLowerCase() === 'ytd-reel-video-renderer';
+    // Clone node so we can safely remove overlays and comments before reading textContent
+    const clone = card.cloneNode(true);
+    const ignores = clone.querySelectorAll(
+      '[data-nospoiler-ignore], .nospoiler-overlay, .nospoiler-rehide-btn, #comments, [target-id="engagement-panel-comments-section"]'
+    );
+    ignores.forEach(ig => ig.remove());
 
-      if (isReel) {
-        // Shorts player: check headline, sound, description (exclude comments and our overlay!)
-        const headline = card.querySelector('#headline, .reel-player-header-headline, h2.title, yt-formatted-string.title');
-        if (headline) {
-          text += ' ' + (headline.textContent || headline.getAttribute('title') || '');
-        }
-        const header = card.querySelector('ytd-reel-player-header-renderer');
-        if (header) {
-          const sound = header.querySelector('.reel-player-header-sound-metadata');
-          if (sound) text += ' ' + sound.textContent;
-          const channel = header.querySelector('ytd-channel-name, #channel-name');
-          if (channel) text += ' ' + channel.textContent;
-        }
-        const desc = card.querySelector('#description, .ytd-reel-player-overlay-renderer #description');
-        if (desc) {
-          text += ' ' + (desc.textContent || '');
-        }
-      } else {
-        // Regular video card
-        const titleEl = card.querySelector('#video-title, .yt-core-attributed-string, yt-formatted-string#video-title, h2.title, yt-formatted-string.title, a#video-title-link');
-        if (titleEl) {
-          text += ' ' + (titleEl.textContent || titleEl.getAttribute('title') || titleEl.getAttribute('aria-label') || '');
-        }
-        const thumb = card.querySelector('a#thumbnail, ytd-thumbnail, ytd-moving-thumbnail-renderer');
-        if (thumb) {
-          text += ' ' + (thumb.getAttribute('aria-label') || thumb.getAttribute('title') || '');
-        }
-        const desc = card.querySelector('#description-text, #content-text');
-        if (desc) {
-          text += ' ' + (desc.textContent || '');
-        }
-        const channel = card.querySelector('#channel-name, ytd-channel-name');
-        if (channel) {
-          text += ' ' + (channel.textContent || '');
-        }
-      }
-    } else if (currentPlatform && currentPlatform.name === 'twitter') {
-      const tweetEl = card.querySelector('div[data-testid="tweetText"]');
-      if (tweetEl) text += ' ' + tweetEl.textContent;
-    } else if (currentPlatform && currentPlatform.name === 'reddit') {
-      const titleEl = card.querySelector('[slot="title"], [data-testid="post-title"], h3');
-      if (titleEl) text += ' ' + titleEl.textContent;
-    } else {
-      // Generic card
-      const clone = card.cloneNode(true);
-      const ignores = clone.querySelectorAll('[data-nospoiler-ignore], .nospoiler-overlay, .nospoiler-rehide-btn');
-      ignores.forEach(ig => ig.remove());
-      text = clone.textContent || '';
-    }
-
+    const text = clone.textContent || '';
     return cleanText(text).replace(/\s+/g, ' ');
   }
 
@@ -819,11 +797,19 @@
     }
   }
 
-  // Dedicated scan for YouTube Shorts renderers
+  // Dedicated scan for YouTube Shorts renderers and description panel
   function scanShorts() {
     if (!settings.enabled || !compiledRegex) return;
     const shorts = document.querySelectorAll('ytd-reel-video-renderer');
     shorts.forEach(s => inspectCard(s));
+
+    // Also check active description panel if open
+    const descPanels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-structured-description"], ytd-engagement-panel-section-list-renderer');
+    descPanels.forEach(p => {
+      if (!p.closest('#comments, [target-id="engagement-panel-comments-section"]')) {
+        inspectCard(p);
+      }
+    });
   }
 
   // Full DOM scan
