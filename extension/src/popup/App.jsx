@@ -3,22 +3,75 @@ import {
   Shield, 
   ShieldAlert, 
   Eye, 
-  EyeOff, 
   Plus, 
   X, 
-  Flame, 
   RefreshCw, 
-  Cloud, 
   Sliders, 
-  VolumeX,
   Layers,
-  CheckCircle2,
-  ExternalLink
+  CheckCircle2
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000/api';
+// Built-in curated spoiler packs (instant, local, zero login needed)
+const BUILTIN_PACKS = [
+  {
+    id: 'pack-gta6',
+    title: 'GTA 6 Ultimate Spoiler Shield',
+    icon: '🌴',
+    description: 'Blocks Vice City leaks, Lucia & Jason plot twists, ending leaks, and dev build footage.',
+    keywords: [
+      'gta 6',
+      'gta vi',
+      'grand theft auto vi',
+      'grand theft auto 6',
+      'lucia',
+      'jason gta',
+      'vice city leak',
+      'leonida leak',
+      'rockstar games leak',
+      'gta 6 leak',
+      'gta 6 gameplay'
+    ]
+  },
+  {
+    id: 'pack-marvel',
+    title: 'Marvel MCU: Avengers & Doomsday',
+    icon: '⚡',
+    description: 'Hides Doctor Doom leaks, Secret Wars cameos, post-credits, and Spider-Man 4 spoilers.',
+    keywords: [
+      'avengers doomsday',
+      'avengers secret wars',
+      'doctor doom leak',
+      'secret wars spoiler',
+      'spider-man 4 leak'
+    ]
+  },
+  {
+    id: 'pack-eldenring',
+    title: 'Elden Ring: Shadow of the Erdtree',
+    icon: '⚔️',
+    description: 'Hides final remembrance boss identities, lore reveals, and secret cutscenes.',
+    keywords: [
+      'elden ring dlc',
+      'shadow of the erdtree final boss',
+      'radahn consort',
+      'miquella cutscene'
+    ]
+  },
+  {
+    id: 'pack-anime',
+    title: 'Weekly Anime & Manga Leaks',
+    icon: '🍥',
+    description: 'Blocks raw chapter leaks, TikTok spoiler edits, and manga spoilers before official release.',
+    keywords: [
+      'one piece chapter leak',
+      'jujutsu kaisen spoiler',
+      'chainsaw man leak',
+      'gear 5 reveal'
+    ]
+  }
+];
 
-// Safe wrapper for chrome.storage to work in both Chrome Extension and standard browser dev
+// Safe storage wrapper for Chrome Extension
 const storage = {
   get: (keys) => {
     return new Promise((resolve) => {
@@ -51,7 +104,7 @@ const storage = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('shield'); // 'shield' | 'packs' | 'sync'
+  const [activeTab, setActiveTab] = useState('shield'); // 'shield' | 'packs'
   const [enabled, setEnabled] = useState(true);
   const [keywords, setKeywords] = useState(['gta 6', 'gta vi']);
   const [newKeyword, setNewKeyword] = useState('');
@@ -61,14 +114,9 @@ export default function App() {
   const [tabCount, setTabCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [isScanning, setIsScanning] = useState(false);
-
-  // MERN Backend Cloud Sync state
-  const [apiKey, setApiKey] = useState('');
-  const [cloudStatus, setCloudStatus] = useState('offline'); // 'offline' | 'connected' | 'syncing'
-  const [communityPacks, setCommunityPacks] = useState([]);
   const [subscribedPacks, setSubscribedPacks] = useState(['pack-gta6']);
 
-  // Presets
+  // Quick preset pills
   const presets = [
     { label: '+ GTA 6', value: 'gta 6' },
     { label: '+ GTA VI', value: 'gta vi' },
@@ -87,7 +135,6 @@ export default function App() {
         'revealOnClick', 
         'muteMedia',
         'totalBlockedCount',
-        'apiKey',
         'subscribedPacks'
       ]);
 
@@ -97,7 +144,6 @@ export default function App() {
       if (saved.revealOnClick !== undefined) setRevealOnClick(saved.revealOnClick);
       if (saved.muteMedia !== undefined) setMuteMedia(saved.muteMedia);
       if (saved.totalBlockedCount !== undefined) setTotalCount(saved.totalBlockedCount);
-      if (saved.apiKey) setApiKey(saved.apiKey);
       if (saved.subscribedPacks) setSubscribedPacks(saved.subscribedPacks);
 
       // Query active tab count if running in Chrome
@@ -112,53 +158,10 @@ export default function App() {
           }
         });
       }
-
-      // Try fetching community packs from MERN backend
-      fetchPacks();
     }
 
     init();
   }, []);
-
-  // Fetch Community Packs from MERN backend
-  async function fetchPacks() {
-    try {
-      const res = await fetch(`${API_BASE}/packs`);
-      if (res.ok) {
-        const data = await res.json();
-        setCommunityPacks(data);
-        setCloudStatus('connected');
-      }
-    } catch (_) {
-      // Local fallback packs if backend isn't started yet
-      setCommunityPacks([
-        {
-          id: 'pack-gta6',
-          title: 'GTA 6 Ultimate Spoiler Shield',
-          icon: '🌴',
-          description: 'Blocks Vice City leaks, Lucia & Jason plot twists, and trailer breakdowns.',
-          keywords: ['gta 6', 'gta vi', 'grand theft auto vi', 'lucia', 'jason gta', 'vice city leak'],
-          subscribersCount: 148200
-        },
-        {
-          id: 'pack-marvel',
-          title: 'Marvel MCU: Avengers & Doomsday',
-          icon: '⚡',
-          description: 'Hides Doctor Doom leaks, Secret Wars cameos and spoilers.',
-          keywords: ['avengers doomsday', 'secret wars', 'doctor doom leak'],
-          subscribersCount: 89400
-        },
-        {
-          id: 'pack-eldenring',
-          title: 'Elden Ring & FromSoft',
-          icon: '⚔️',
-          description: 'Blocks lore reveals and final boss identities.',
-          keywords: ['elden ring dlc', 'shadow of the erdtree final boss', 'radahn consort'],
-          subscribersCount: 51200
-        }
-      ]);
-    }
-  }
 
   // Toggle master on/off
   async function handleToggleEnabled() {
@@ -177,15 +180,6 @@ export default function App() {
     setKeywords(updated);
     setNewKeyword('');
     await storage.set({ keywords: updated });
-
-    // Sync to MERN backend if API Key provided
-    if (apiKey) {
-      fetch(`${API_BASE}/keywords`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-        body: JSON.stringify({ keyword: val })
-      }).catch(() => {});
-    }
   }
 
   // Add from preset pill
@@ -201,13 +195,6 @@ export default function App() {
     const updated = keywords.filter(k => k !== keywordToRemove);
     setKeywords(updated);
     await storage.set({ keywords: updated });
-
-    if (apiKey) {
-      fetch(`${API_BASE}/keywords/${encodeURIComponent(keywordToRemove)}`, {
-        method: 'DELETE',
-        headers: { 'x-api-key': apiKey }
-      }).catch(() => {});
-    }
   }
 
   // Change blur intensity
@@ -216,18 +203,16 @@ export default function App() {
     await storage.set({ blurIntensity: val });
   }
 
-  // Toggle community pack subscription
+  // Toggle community pack subscription (adds/removes its keywords locally)
   async function handleTogglePack(pack) {
     let nextSubscribed;
     let nextKeywords = [...keywords];
 
     if (subscribedPacks.includes(pack.id)) {
       nextSubscribed = subscribedPacks.filter(id => id !== pack.id);
-      // Remove pack keywords that aren't manually added
       nextKeywords = nextKeywords.filter(k => !pack.keywords.includes(k));
     } else {
       nextSubscribed = [...subscribedPacks, pack.id];
-      // Add pack keywords
       pack.keywords.forEach(k => {
         if (!nextKeywords.includes(k)) nextKeywords.push(k);
       });
@@ -248,38 +233,14 @@ export default function App() {
             if (!chrome.runtime.lastError && res) {
               setTabCount(res.count || 0);
             }
-            setTimeout(() => setIsScanning(false), 300);
+            setTimeout(() => setIsScanning(false), 250);
           });
         } else {
           setIsScanning(false);
         }
       });
     } else {
-      setTimeout(() => setIsScanning(false), 300);
-    }
-  }
-
-  // Save API Key and sync with MERN
-  async function handleSaveApiKey() {
-    await storage.set({ apiKey });
-    setCloudStatus('syncing');
-    try {
-      const res = await fetch(`${API_BASE}/keywords`, {
-        headers: { 'x-api-key': apiKey }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.allKeywords && data.allKeywords.length > 0) {
-          const merged = Array.from(new Set([...keywords, ...data.allKeywords]));
-          setKeywords(merged);
-          await storage.set({ keywords: merged });
-        }
-        setCloudStatus('connected');
-      } else {
-        setCloudStatus('offline');
-      }
-    } catch (_) {
-      setCloudStatus('offline');
+      setTimeout(() => setIsScanning(false), 250);
     }
   }
 
@@ -293,12 +254,12 @@ export default function App() {
           </div>
           <div className="brand-titles">
             <h1 className="title">NoSpoiler</h1>
-            <span className="subtitle">MERN & React Shield</span>
+            <span className="subtitle">Instant Content Shield</span>
           </div>
         </div>
 
         {/* Master Power Toggle */}
-        <label className="toggle-switch">
+        <label className="toggle-switch" title={enabled ? "Shield Active" : "Shield Paused"}>
           <input 
             type="checkbox" 
             checked={enabled} 
@@ -314,23 +275,17 @@ export default function App() {
           className={`tab-btn ${activeTab === 'shield' ? 'active' : ''}`}
           onClick={() => setActiveTab('shield')}
         >
-          <ShieldAlert size={14} /> Shield
+          <ShieldAlert size={14} /> My Blocklist
         </button>
         <button 
           className={`tab-btn ${activeTab === 'packs' ? 'active' : ''}`}
           onClick={() => setActiveTab('packs')}
         >
-          <Layers size={14} /> Packs
-        </button>
-        <button 
-          className={`tab-btn ${activeTab === 'sync' ? 'active' : ''}`}
-          onClick={() => setActiveTab('sync')}
-        >
-          <Cloud size={14} /> MERN Sync
+          <Layers size={14} /> Quick Packs
         </button>
       </nav>
 
-      {/* TAB 1: SHIELD / KEYWORDS */}
+      {/* TAB 1: BLOCKLIST / KEYWORDS */}
       {activeTab === 'shield' && (
         <main className="tab-content">
           {/* Live Stats */}
@@ -347,11 +302,11 @@ export default function App() {
 
           {/* Add Keyword Form */}
           <div className="card">
-            <span className="card-label">Filter Keywords</span>
+            <span className="card-label">Block New Keyword</span>
             <form onSubmit={handleAddKeyword} className="input-row">
               <input 
                 type="text" 
-                placeholder="e.g. gta 6, spoilers..."
+                placeholder="Type keyword to blur (e.g. gta 6)..."
                 value={newKeyword}
                 onChange={(e) => setNewKeyword(e.target.value)}
                 maxLength={40}
@@ -361,7 +316,7 @@ export default function App() {
               </button>
             </form>
 
-            {/* Presets */}
+            {/* Quick Presets */}
             <div className="presets-row">
               <span className="presets-label">Quick:</span>
               <div className="pills-scroll">
@@ -378,16 +333,16 @@ export default function App() {
               </div>
             </div>
 
-            {/* Tag Cloud */}
+            {/* Active Keywords Tags */}
             <div className="keywords-box">
               <div className="keywords-header">
-                <span>Active Filters ({keywords.length})</span>
+                <span>Active Keywords ({keywords.length})</span>
                 {keywords.length > 0 && (
                   <button 
                     className="clear-link" 
                     onClick={() => { setKeywords([]); storage.set({ keywords: [] }); }}
                   >
-                    Clear
+                    Clear All
                   </button>
                 )}
               </div>
@@ -407,14 +362,14 @@ export default function App() {
                 ))}
                 {keywords.length === 0 && (
                   <div className="empty-state">
-                    No keywords active. Add "gta 6" above or enable a Community Pack!
+                    No keywords added yet. Type "gta 6" above or enable a Quick Pack!
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Blur & Playback Options */}
+          {/* Blur & Display Controls */}
           <div className="card">
             <span className="card-label">Blur Options</span>
 
@@ -422,7 +377,7 @@ export default function App() {
             <div className="control-row">
               <div className="control-desc">
                 <span className="name">Blur Strength</span>
-                <span className="desc">Visual opacity of spoilers</span>
+                <span className="desc">How heavily spoilers are hidden</span>
               </div>
               <div className="segmented-group">
                 {['medium', 'high', 'blackout'].map((lvl) => (
@@ -441,7 +396,7 @@ export default function App() {
             <div className="control-row">
               <div className="control-desc">
                 <span className="name">Click to Reveal</span>
-                <span className="desc">Tap blurred card to view</span>
+                <span className="desc">Tap blurred card to unhide it</span>
               </div>
               <input 
                 type="checkbox" 
@@ -472,16 +427,16 @@ export default function App() {
         </main>
       )}
 
-      {/* TAB 2: COMMUNITY PACKS */}
+      {/* TAB 2: QUICK PACKS */}
       {activeTab === 'packs' && (
         <main className="tab-content">
           <div className="packs-intro">
-            <h3>Community Curated Shields</h3>
-            <p>1-Click subscribe to crowdsourced spoiler protections synced from the MERN backend.</p>
+            <h3>Pre-Configured Spoiler Packs</h3>
+            <p>1-Click enable instant protection against major leaks.</p>
           </div>
 
           <div className="packs-list">
-            {communityPacks.map(pack => {
+            {BUILTIN_PACKS.map(pack => {
               const isSubbed = subscribedPacks.includes(pack.id);
               return (
                 <div key={pack.id} className={`pack-card ${isSubbed ? 'subbed' : ''}`}>
@@ -490,7 +445,7 @@ export default function App() {
                     <div className="pack-details">
                       <span className="pack-title">{pack.title}</span>
                       <span className="pack-subs">
-                        {(pack.subscribersCount || 0).toLocaleString()} protected users
+                        {pack.keywords.length} protected terms
                       </span>
                     </div>
                     <button 
@@ -498,7 +453,7 @@ export default function App() {
                       onClick={() => handleTogglePack(pack)}
                     >
                       {isSubbed ? <CheckCircle2 size={16} /> : <Plus size={16} />}
-                      {isSubbed ? 'Active' : 'Add'}
+                      {isSubbed ? 'Enabled' : 'Enable'}
                     </button>
                   </div>
                   <p className="pack-desc">{pack.description}</p>
@@ -517,64 +472,20 @@ export default function App() {
         </main>
       )}
 
-      {/* TAB 3: MERN CLOUD SYNC */}
-      {activeTab === 'sync' && (
-        <main className="tab-content">
-          <div className="card">
-            <span className="card-label">MERN Cloud Sync</span>
-            <p className="sync-info">
-              Pair this extension with your Next.js Dashboard & Node/MongoDB backend to sync keywords across devices.
-            </p>
-
-            <div className="sync-status-row">
-              <span>Backend Status:</span>
-              <span className={`status-pill ${cloudStatus}`}>
-                {cloudStatus === 'connected' ? '● Connected (MongoDB)' : '○ Local / Standalone'}
-              </span>
-            </div>
-
-            <div className="input-column">
-              <label className="field-label">Account API Key / Token</label>
-              <input 
-                type="text" 
-                placeholder="Paste API Key (e.g. nsp_...)"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-              />
-              <button 
-                className="btn-sync" 
-                onClick={handleSaveApiKey}
-                disabled={cloudStatus === 'syncing'}
-              >
-                <RefreshCw size={14} className={cloudStatus === 'syncing' ? 'spin' : ''} />
-                {cloudStatus === 'syncing' ? 'Syncing...' : 'Save & Sync Keywords'}
-              </button>
-            </div>
-          </div>
-
-          <div className="card">
-            <span className="card-label">Dashboard Portal</span>
-            <p className="sync-info">
-              Open the full Next.js dashboard at <code>http://localhost:3000</code> to browse packs, view analytics, and simulate blurring.
-            </p>
-          </div>
-        </main>
-      )}
-
       {/* Footer */}
       <footer className="footer">
         <div className="footer-status">
           <span className={`status-bulb ${enabled ? 'active' : 'paused'}`}></span>
-          <span>{enabled ? 'Shield is Active' : 'Shield Paused'}</span>
+          <span>{enabled ? 'Shield is Active' : 'Shield is Paused'}</span>
         </div>
         <button 
           className="btn-rescan" 
           onClick={handleRescanTab} 
           disabled={isScanning}
-          title="Rescan current page"
+          title="Rescan current page now"
         >
           <RefreshCw size={12} className={isScanning ? 'spin' : ''} />
-          {isScanning ? 'Scanning...' : 'Rescan Page'}
+          {isScanning ? 'Scanning...' : 'Rescan'}
         </button>
       </footer>
     </div>
