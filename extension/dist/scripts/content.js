@@ -1,6 +1,7 @@
 /**
  * NoSpoiler - Content Script
  * Scans web content & social media feeds, blurring spoilers based on user-defined keywords.
+ * Precisely targets individual video cards, tweets, and posts without affecting outer page layouts.
  */
 
 (() => {
@@ -29,15 +30,25 @@
       name: 'youtube',
       match: /youtube\.com/,
       containers: [
-        'ytd-rich-item-renderer',
-        'ytd-video-renderer',
-        'ytd-compact-video-renderer',
-        'ytd-grid-video-renderer',
-        'ytd-reel-item-renderer',
-        'yt-lockup-view-model',
-        'ytd-comment-thread-renderer',
-        'ytd-post-renderer',
-        'ytd-playlist-video-renderer'
+        'ytd-rich-item-renderer',       // Individual home/channel video tile
+        'ytd-video-renderer',           // Search result video
+        'ytd-compact-video-renderer',   // Watch page sidebar related video
+        'ytd-grid-video-renderer',      // Channel tab video
+        'ytd-reel-item-renderer',       // Shorts shelf item
+        'yt-lockup-view-model',         // Modern YouTube lockup item
+        'ytd-rich-grid-slim-media',     // Slim media items
+        'ytd-comment-thread-renderer',  // Individual comment thread
+        'ytd-comment-view-model',       // Single comment
+        'ytd-post-renderer',            // Community post
+        'ytd-playlist-video-renderer'   // Playlist item
+      ],
+      // Elements that MUST NEVER be blurred
+      blacklist: [
+        'ytd-app', 'ytd-page-manager', 'ytd-browse', 'ytd-search', 'ytd-watch-flexy',
+        'ytd-rich-grid-renderer', 'ytd-rich-grid-row', 'ytd-rich-section-renderer',
+        'ytd-section-list-renderer', 'ytd-item-section-renderer', 'ytd-feed-filter-chip-bar-renderer',
+        '#page-manager', '#primary', '#secondary', '#columns', '#contents', '#chips-wrapper',
+        '#guide', '#header', '#masthead-container', 'ytd-masthead'
       ]
     },
     {
@@ -46,7 +57,12 @@
       containers: [
         'article[data-testid="tweet"]',
         'div[data-testid="cellInnerDiv"]',
-        'div[data-testid="trend"]'
+        'div[data-testid="trend"]',
+        'div[data-testid="UserCell"]'
+      ],
+      blacklist: [
+        'main', 'section', 'div[data-testid="primaryColumn"]',
+        'div[data-testid="sidebarColumn"]', 'div[aria-label="Home Timeline"]'
       ]
     },
     {
@@ -58,6 +74,9 @@
         '.Post',
         'shreddit-comment',
         '.comment'
+      ],
+      blacklist: [
+        'shreddit-feed', '#main-content', 'main', 'reddit-feed', 'div[id*="feed"]'
       ]
     },
     {
@@ -67,7 +86,8 @@
         'article',
         'div._ac7v',
         'div[role="presentation"]'
-      ]
+      ],
+      blacklist: ['main', 'section', 'div[role="main"]']
     },
     {
       name: 'facebook',
@@ -76,7 +96,8 @@
         'div[role="feed"] > div',
         'div[data-pagelet^="FeedUnit"]',
         'div[role="article"]'
-      ]
+      ],
+      blacklist: ['div[role="feed"]', 'div[role="main"]', 'body', 'html']
     },
     {
       name: 'threads',
@@ -84,7 +105,8 @@
       containers: [
         'div[data-pressable-container="true"]',
         'article'
-      ]
+      ],
+      blacklist: ['main', 'div[role="main"]']
     },
     {
       name: 'tiktok',
@@ -92,7 +114,8 @@
       containers: [
         'div[data-e2e="recommend-list-item-container"]',
         'div[data-e2e="user-post-item"]'
-      ]
+      ],
+      blacklist: ['main', 'div[data-e2e="feed-container"]']
     },
     {
       name: 'google-search',
@@ -100,9 +123,9 @@
       containers: [
         'div.g',
         'div.MjjYud',
-        'div[jscontroller].Ww4FFb',
-        'div.hlcw0c'
-      ]
+        'li.b_algo'
+      ],
+      blacklist: ['#search', '#rcnt', '#center_col', '#rso', 'main']
     }
   ];
 
@@ -126,9 +149,7 @@
     // Build regex patterns
     const patterns = validKeywords.map(k => {
       const escaped = escapeRegExp(k);
-      // Replace flexible whitespace
       const flexible = escaped.replace(/\s+/g, '\\s+');
-      // If starts/ends with alphanumeric characters, apply word boundary checks
       const startBoundary = /^\w/.test(k) ? '(?:^|\\W)' : '';
       const endBoundary = /\w$/.test(k) ? '(?:$|\\W)' : '';
       return `${startBoundary}(${flexible})${endBoundary}`;
@@ -165,17 +186,54 @@
 
   const currentPlatform = getCurrentPlatform();
 
-  // Find the most appropriate container to blur
+  // Safety check to ensure we NEVER blur an outer layout, feed, or full-page container
+  function isValidContainer(el) {
+    if (!el || !(el instanceof HTMLElement)) return false;
+    const tag = el.tagName.toLowerCase();
+
+    // Never blur root or structural elements
+    if (['html', 'body', 'main', 'header', 'footer', 'nav', 'aside', 'section'].includes(tag)) {
+      return false;
+    }
+    if (el.id === 'root' || el.id === 'app' || el.id === '__next' || el.id === 'content') {
+      return false;
+    }
+
+    // Check platform specific blacklist
+    if (currentPlatform && currentPlatform.blacklist) {
+      for (const b of currentPlatform.blacklist) {
+        try {
+          if (b.startsWith('#') && el.id === b.slice(1)) return false;
+          if (el.matches(b)) return false;
+        } catch (_) {}
+      }
+    }
+
+    // Never blur elements that span almost the entire screen or multiple grid items
+    const rect = el.getBoundingClientRect();
+    if (rect.height > window.innerHeight * 0.85 && rect.width > window.innerWidth * 0.75) {
+      return false;
+    }
+
+    // Never blur containers that contain more than 8 other major child elements
+    if (el.children.length > 25) {
+      return false;
+    }
+
+    return true;
+  }
+
+  // Find the exact individual card/post container to blur
   function findBestContainer(node) {
     const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
     if (!element) return null;
 
-    // Ignore elements inside an existing overlay or rehide button
-    if (element.closest('[data-nospoiler-ignore="true"]') || element.closest('.nospoiler-rehide-btn')) {
+    // Ignore nodes inside an existing overlay, already blurred element, or rehide button
+    if (element.closest('[data-nospoiler-ignore="true"]') || element.closest('.nospoiler-blurred')) {
       return null;
     }
 
-    // 1. Check Platform-Specific Containers
+    // 1. Check Platform-Specific Item Containers (e.g. YouTube video card, Tweet card)
     if (currentPlatform && currentPlatform.containers) {
       for (const selector of currentPlatform.containers) {
         try {
@@ -185,10 +243,17 @@
           }
         } catch (_) {}
       }
+      // If we are on YouTube/Twitter/Reddit but didn't find the known card, DO NOT blur a generic div!
+      // Fallback only to the direct title/block element containing the text:
+      const tightBlock = element.closest('h1, h2, h3, h4, h5, h6, #video-title, yt-formatted-string, p, a');
+      if (tightBlock && isValidContainer(tightBlock)) {
+        return tightBlock;
+      }
+      return null;
     }
 
-    // 2. Generic Card / Post container heuristics
-    const genericSelector = 'article, [role="article"], .card, .post, .feed-item, .entry, .feed-post, li.b_algo';
+    // 2. Generic Card / Post container heuristics (articles, cards)
+    const genericSelector = 'article, [role="article"], .card, .feed-item, .post-card, li.b_algo';
     try {
       const candidate = element.closest(genericSelector);
       if (candidate && isValidContainer(candidate)) {
@@ -196,36 +261,14 @@
       }
     } catch (_) {}
 
-    // 3. Fallback to closest block-level element
-    const blockSelector = 'p, h1, h2, h3, h4, h5, h6, blockquote, figure, li, div';
-    let block = element.closest(blockSelector);
+    // 3. Fallback to nearest block-level text element (NEVER generic div)
+    const blockSelector = 'p, h1, h2, h3, h4, h5, h6, blockquote, figure, li';
+    const block = element.closest(blockSelector);
     if (block && isValidContainer(block)) {
       return block;
     }
 
-    return isValidContainer(element) ? element : null;
-  }
-
-  // Safety check so we NEVER blur the entire webpage or major layout roots
-  function isValidContainer(el) {
-    if (!el || !(el instanceof HTMLElement)) return false;
-    const tag = el.tagName.toLowerCase();
-
-    // Never blur root/page structures
-    if (['html', 'body', 'main', 'header', 'footer', 'nav'].includes(tag)) {
-      return false;
-    }
-    if (el.id === 'root' || el.id === 'app' || el.id === '__next' || el.id === 'content') {
-      return false;
-    }
-
-    // Check size ratio against window
-    const rect = el.getBoundingClientRect();
-    if (rect.height > window.innerHeight * 0.92 && rect.width > window.innerWidth * 0.85) {
-      return false;
-    }
-
-    return true;
+    return null;
   }
 
   // SVG shield icon for overlay
@@ -236,9 +279,12 @@
     </svg>
   `;
 
-  // Apply blur to a container element
+  // Apply blur to an individual element
   function blurElement(container, matchedText) {
     if (!container || container.classList.contains('nospoiler-blurred')) return;
+
+    // Double check we're not blurring an entire page or layout
+    if (!isValidContainer(container)) return;
 
     const matchedKeyword = findMatchedKeyword(matchedText);
 
@@ -247,7 +293,7 @@
     container.classList.add(`nospoiler-blur-${settings.blurIntensity}`);
     container.setAttribute('data-nospoiler-blurred', 'true');
 
-    // Pause / Mute media if playing inside
+    // Pause / Mute media if playing inside this specific card
     if (settings.muteMedia) {
       const mediaElements = container.querySelectorAll('video, audio');
       mediaElements.forEach(media => {
@@ -269,7 +315,7 @@
     overlay.className = 'nospoiler-overlay';
     overlay.setAttribute('data-nospoiler-ignore', 'true');
 
-    // Check if container is compact
+    // Check if container is compact (e.g. small shorts tile or single comment)
     const rect = container.getBoundingClientRect();
     const isCompact = rect.height > 0 && rect.height < 90;
     if (isCompact) {
@@ -390,30 +436,19 @@
 
   // Scan a node for matching keywords
   function inspectNode(node) {
-    if (!settings.enabled || !compiledRegex) return;
-    if (!node) return;
+    if (!settings.enabled || !compiledRegex || !node) return;
 
-    // Skip if part of an overlay or ignored
+    // Skip ignored nodes, already blurred containers, scripts, styles, etc.
     if (node.nodeType === Node.ELEMENT_NODE) {
-      if (node.hasAttribute('data-nospoiler-ignore') || node.classList.contains('nospoiler-container')) {
+      const tag = node.tagName.toLowerCase();
+      if (['script', 'style', 'noscript', 'meta', 'link', 'svg', 'iframe'].includes(tag)) {
         return;
       }
-    }
-
-    // Check text nodes
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.textContent;
-      if (text && text.trim().length > 1 && compiledRegex.test(text)) {
-        const container = findBestContainer(node);
-        if (container) {
-          blurElement(container, text);
-        }
+      if (node.hasAttribute('data-nospoiler-ignore') || node.classList.contains('nospoiler-container') || node.closest('.nospoiler-blurred')) {
+        return;
       }
-      return;
-    }
 
-    // Check element attributes (img alt, aria-label, title)
-    if (node.nodeType === Node.ELEMENT_NODE) {
+      // Check image alt or title attributes
       const alt = node.getAttribute('alt') || '';
       const aria = node.getAttribute('aria-label') || '';
       const title = node.getAttribute('title') || '';
@@ -423,16 +458,30 @@
         const container = findBestContainer(node);
         if (container) {
           blurElement(container, attrText);
-          return;
         }
       }
+      return;
+    }
 
-      // Check innerText if reasonable length
-      const directText = node.textContent || '';
-      if (directText && compiledRegex.test(directText)) {
+    // Check text nodes ONLY (Never check concatenated textContent on parent element containers!)
+    if (node.nodeType === Node.TEXT_NODE) {
+      const parent = node.parentElement;
+      if (!parent) return;
+
+      const pTag = parent.tagName.toLowerCase();
+      if (['script', 'style', 'noscript', 'svg'].includes(pTag)) {
+        return;
+      }
+
+      if (parent.closest('[data-nospoiler-ignore="true"]') || parent.closest('.nospoiler-blurred')) {
+        return;
+      }
+
+      const text = node.textContent;
+      if (text && text.trim().length > 1 && compiledRegex.test(text)) {
         const container = findBestContainer(node);
         if (container) {
-          blurElement(container, directText);
+          blurElement(container, text);
         }
       }
     }
@@ -456,34 +505,38 @@
   }
 
   function queueNodeForScan(node) {
-    if (!settings.enabled || !compiledRegex) return;
+    if (!settings.enabled || !compiledRegex || !node) return;
     pendingNodes.add(node);
 
     if (!isScanning) {
       isScanning = true;
       if (window.requestIdleCallback) {
-        window.requestIdleCallback(() => processPendingNodes(), { timeout: 150 });
+        window.requestIdleCallback(() => processPendingNodes(), { timeout: 100 });
       } else {
         clearTimeout(mutationTimeout);
-        mutationTimeout = setTimeout(processPendingNodes, 60);
+        mutationTimeout = setTimeout(processPendingNodes, 40);
       }
     }
   }
 
-  // Full DOM scan
+  // Full DOM scan using TreeWalker
   function scanFullDocument() {
     if (!settings.enabled || !compiledRegex) return;
 
-    // Use TreeWalker for fast text node traversal
     const root = document.body || document.documentElement;
     if (!root) return;
 
+    // Show Text nodes and Element nodes with attributes
     const walker = document.createTreeWalker(
       root,
       NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
       {
         acceptNode(n) {
           if (n.nodeType === Node.ELEMENT_NODE) {
+            const tag = n.tagName.toLowerCase();
+            if (['script', 'style', 'noscript', 'svg', 'iframe'].includes(tag)) {
+              return NodeFilter.FILTER_REJECT;
+            }
             if (n.hasAttribute('data-nospoiler-ignore') || n.classList.contains('nospoiler-blurred')) {
               return NodeFilter.FILTER_REJECT;
             }
@@ -499,7 +552,7 @@
     }
   }
 
-  // MutationObserver to catch dynamically loaded content (infinite scroll, live feeds)
+  // MutationObserver to catch dynamically loaded content
   const observer = new MutationObserver((mutations) => {
     if (!settings.enabled || !compiledRegex) return;
 
@@ -576,7 +629,6 @@
 
     if (changes.blurIntensity !== undefined) {
       settings.blurIntensity = changes.blurIntensity.newValue;
-      // Update blur class on existing blurred containers
       document.querySelectorAll('.nospoiler-container').forEach(c => {
         c.classList.remove('nospoiler-blur-medium', 'nospoiler-blur-high', 'nospoiler-blur-blackout');
         c.classList.add(`nospoiler-blur-${settings.blurIntensity}`);
