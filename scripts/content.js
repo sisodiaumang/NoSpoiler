@@ -351,25 +351,21 @@
     return 'dark';
   }
 
-  // SVG shield icon for overlay
-  const SHIELD_SVG = `
-    <svg class="nospoiler-badge-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M12 2L4 5V11.09C4 16.14 7.41 20.85 12 22C16.59 20.85 20 16.14 20 11.09V5L12 2Z" fill="currentColor"/>
-      <path d="M12 7V17M8 12H16" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
-    </svg>
-  `;
-
   // Apply blur to an individual element
   function blurElement(container, matchedText) {
     if (!container) return;
 
+    // Purge any stale re-hide button so it NEVER displays while blurred
+    const oldRehides = container.querySelectorAll('.nospoiler-rehide-btn');
+    oldRehides.forEach(b => b.remove());
+
     // If already blurred, simply update the keyword badge if needed
     if (container.classList.contains('nospoiler-blurred')) {
       const matchedKeyword = findMatchedKeyword(matchedText);
-      const tag = container.querySelector('.nospoiler-keyword-tag');
+      const tag = container.querySelector('.nospoiler-keyword');
       if (tag) {
-        tag.textContent = `"${matchedKeyword}"`;
-        tag.title = `Matched keyword: ${matchedKeyword}`;
+        tag.textContent = matchedKeyword;
+        tag.title = `Keyword: ${matchedKeyword}`;
       }
       return;
     }
@@ -413,7 +409,7 @@
       });
     }
 
-    // Create or re-use Frosted Glass Overlay
+    // Create or re-use Frosted Glass Overlay (clean, native, 0% AI-slop)
     let overlay = container.querySelector('.nospoiler-overlay');
     if (!overlay) {
       overlay = document.createElement('div');
@@ -429,18 +425,14 @@
       }
 
       overlay.innerHTML = `
-        <div class="nospoiler-badge" data-nospoiler-ignore="true">
-          <div class="nospoiler-badge-header" data-nospoiler-ignore="true">
-            ${SHIELD_SVG}
-            <span class="nospoiler-title" data-nospoiler-ignore="true">Spoiler Blocked</span>
-          </div>
-          <div class="nospoiler-keyword-tag" title="Matched keyword: ${matchedKeyword}" data-nospoiler-ignore="true">
-            "${matchedKeyword}"
+        <div class="nospoiler-card" data-nospoiler-ignore="true">
+          <div class="nospoiler-meta" data-nospoiler-ignore="true">
+            <span class="nospoiler-label" data-nospoiler-ignore="true">Spoiler</span>
+            <span class="nospoiler-sep" data-nospoiler-ignore="true">·</span>
+            <span class="nospoiler-keyword" data-nospoiler-ignore="true">${matchedKeyword}</span>
           </div>
           ${settings.revealOnClick ? `
-            <div class="nospoiler-reveal-hint" data-nospoiler-ignore="true">
-              <span>👁️</span> Click to reveal
-            </div>
+            <div class="nospoiler-hint" data-nospoiler-ignore="true">Click to view</div>
           ` : ''}
         </div>
       `;
@@ -456,10 +448,10 @@
       container.appendChild(overlay);
     } else {
       overlay.setAttribute('data-nospoiler-theme', theme);
-      const tag = overlay.querySelector('.nospoiler-keyword-tag');
+      const tag = overlay.querySelector('.nospoiler-keyword');
       if (tag) {
-        tag.textContent = `"${matchedKeyword}"`;
-        tag.title = `Matched keyword: ${matchedKeyword}`;
+        tag.textContent = matchedKeyword;
+        tag.title = `Keyword: ${matchedKeyword}`;
       }
     }
 
@@ -549,19 +541,20 @@
       } catch (_) {}
     });
 
-    // Attach small "Re-hide" button in corner
+    // Attach subtle "Hide" button in corner on reveal
     let rehideBtn = container.querySelector('.nospoiler-rehide-btn');
     if (!rehideBtn) {
       rehideBtn = document.createElement('button');
       rehideBtn.type = 'button';
       rehideBtn.className = 'nospoiler-rehide-btn';
       rehideBtn.setAttribute('data-nospoiler-ignore', 'true');
-      rehideBtn.innerHTML = `🛡️ Re-hide`;
-      rehideBtn.title = 'Re-blur this spoiler';
+      rehideBtn.textContent = 'Hide';
+      rehideBtn.title = 'Hide spoiler';
 
       rehideBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
+        rehideBtn.remove();
         container.classList.remove('nospoiler-revealed');
         container.classList.add('nospoiler-blurred', `nospoiler-blur-${settings.blurIntensity}`);
         if (overlay) overlay.style.display = 'flex';
@@ -726,10 +719,10 @@
       } else {
         // Already blurred, update keyword tag if keyword changed
         const matched = findMatchedKeyword(cardText);
-        const tag = card.querySelector('.nospoiler-keyword-tag');
+        const tag = card.querySelector('.nospoiler-keyword');
         if (tag) {
-          tag.textContent = `"${matched}"`;
-          tag.title = `Matched keyword: ${matched}`;
+          tag.textContent = matched;
+          tag.title = `Keyword: ${matched}`;
         }
       }
     } else {
