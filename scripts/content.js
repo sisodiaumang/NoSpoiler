@@ -402,7 +402,12 @@
   function revealElement(container) {
     if (!container) return;
 
-    container.classList.remove('nospoiler-blurred');
+    container.classList.remove(
+      'nospoiler-blurred',
+      'nospoiler-blur-medium',
+      'nospoiler-blur-high',
+      'nospoiler-blur-blackout'
+    );
     container.classList.add('nospoiler-revealed');
 
     // Resume media if it was playing before
@@ -434,7 +439,7 @@
         e.stopPropagation();
         e.preventDefault();
         container.classList.remove('nospoiler-revealed');
-        container.classList.add('nospoiler-blurred');
+        container.classList.add('nospoiler-blurred', `nospoiler-blur-${settings.blurIntensity}`);
       });
 
       container.appendChild(rehideBtn);

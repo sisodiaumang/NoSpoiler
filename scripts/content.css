@@ -11,23 +11,26 @@
   transition: filter 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-/* Blur Intensities applied directly to content elements */
+/* Blur Intensities applied directly to content elements ONLY when .nospoiler-blurred is present */
 .nospoiler-container.nospoiler-blurred > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
   pointer-events: none !important;
   user-select: none !important;
-  transition: filter 0.3s ease !important;
+  transition: filter 0.25s ease, opacity 0.25s ease !important;
 }
 
-.nospoiler-container.nospoiler-blur-medium > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
-  filter: blur(14px) grayscale(40%) opacity(0.45) !important;
+.nospoiler-container.nospoiler-blurred.nospoiler-blur-medium > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
+  filter: blur(14px) grayscale(40%) !important;
+  opacity: 0.45 !important;
 }
 
-.nospoiler-container.nospoiler-blur-high > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
-  filter: blur(24px) grayscale(70%) opacity(0.3) !important;
+.nospoiler-container.nospoiler-blurred.nospoiler-blur-high > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
+  filter: blur(24px) grayscale(70%) !important;
+  opacity: 0.3 !important;
 }
 
-.nospoiler-container.nospoiler-blur-blackout > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
-  filter: blur(35px) brightness(0.08) opacity(0.15) !important;
+.nospoiler-container.nospoiler-blurred.nospoiler-blur-blackout > *:not(.nospoiler-overlay):not(.nospoiler-rehide-btn) {
+  filter: blur(35px) brightness(0.08) !important;
+  opacity: 0.15 !important;
 }
 
 /* Frosted glass overlay that covers ONLY the blurred container */
@@ -190,11 +193,13 @@
   margin-top: 0 !important;
 }
 
-/* Revealed State: overlay hidden, content clear */
-.nospoiler-container.nospoiler-revealed > *:not(.nospoiler-rehide-btn) {
+/* Revealed State: overlay hidden, content 100% clear & full opacity */
+.nospoiler-container.nospoiler-revealed > * {
   filter: none !important;
+  opacity: 1 !important;
   pointer-events: auto !important;
   user-select: auto !important;
+  transition: filter 0.25s ease, opacity 0.25s ease !important;
 }
 
 .nospoiler-container.nospoiler-revealed .nospoiler-overlay {
