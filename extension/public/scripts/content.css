@@ -176,21 +176,19 @@
   border-radius: 6px !important;
 }
 
-/* Revealed State: overlay hidden, content 100% clear & full opacity */
-.nospoiler-container.nospoiler-revealed {
+/* Revealed State: overlay hidden, content 100% clear & native */
+.nospoiler-revealed {
   contain: none !important;
   overflow: visible !important;
 }
 
-.nospoiler-container.nospoiler-revealed,
-.nospoiler-container.nospoiler-revealed * {
+.nospoiler-revealed,
+.nospoiler-revealed > * {
   filter: none !important;
   opacity: 1 !important;
-  pointer-events: auto !important;
-  user-select: auto !important;
 }
 
-.nospoiler-container.nospoiler-revealed .nospoiler-overlay {
+.nospoiler-revealed .nospoiler-overlay {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
@@ -198,8 +196,8 @@
 }
 
 /* RE-HIDE BUTTON: NEVER show when element is hidden/blurred */
-.nospoiler-container.nospoiler-blurred .nospoiler-rehide-btn,
-.nospoiler-container:not(.nospoiler-revealed) .nospoiler-rehide-btn {
+.nospoiler-blurred .nospoiler-rehide-btn,
+:not(.nospoiler-revealed) > .nospoiler-rehide-btn {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
@@ -207,7 +205,7 @@
 }
 
 /* Subtle, clean "Hide" chip on revealed card on hover (no sloppy emojis) */
-.nospoiler-container.nospoiler-revealed .nospoiler-rehide-btn {
+.nospoiler-revealed .nospoiler-rehide-btn {
   position: absolute !important;
   top: 10px !important;
   right: 10px !important;
@@ -232,12 +230,12 @@
   pointer-events: none !important;
 }
 
-.nospoiler-container.nospoiler-revealed:hover .nospoiler-rehide-btn {
+.nospoiler-revealed:hover .nospoiler-rehide-btn {
   opacity: 0.85 !important;
   pointer-events: auto !important;
 }
 
-.nospoiler-container.nospoiler-revealed .nospoiler-rehide-btn:hover {
+.nospoiler-revealed .nospoiler-rehide-btn:hover {
   opacity: 1 !important;
   background: rgba(35, 35, 35, 0.95) !important;
   color: #ffffff !important;

@@ -515,10 +515,11 @@
   function revealElement(container) {
     if (!container) return;
 
-    // 1. Remove blurred classes from container and any descendants
+    // 1. Remove blurred classes and container layout styles from container and any descendants
     const allContainers = [container, ...container.querySelectorAll('.nospoiler-container, [data-nospoiler-blurred]')];
     allContainers.forEach(c => {
       c.classList.remove(
+        'nospoiler-container',
         'nospoiler-blurred',
         'nospoiler-blur-medium',
         'nospoiler-blur-high',
@@ -526,43 +527,44 @@
       );
       c.classList.add('nospoiler-revealed');
       c.removeAttribute('data-nospoiler-blurred');
+      if (c.dataset.nospoilerSetPosition === 'true') {
+        c.style.position = '';
+        delete c.dataset.nospoilerSetPosition;
+      }
     });
 
     // Record revealed video src for Shorts so recycled check knows it was user-revealed
     const video = container.querySelector('video');
     container.dataset.nospoilerRevealedSrc = video ? (video.currentSrc || video.src || 'revealed') : 'revealed';
 
-    // 2. Hide all overlays completely
+    // 2. Remove all overlays completely from the DOM so they can NEVER intercept clicks
     const overlays = container.querySelectorAll('.nospoiler-overlay');
-    overlays.forEach(ov => {
-      ov.style.display = 'none';
-    });
+    overlays.forEach(ov => ov.remove());
 
-    // 3. Clear any direct inline filters/opacity on descendants
-    const directChildren = container.querySelectorAll('*');
-    directChildren.forEach(ch => {
-      if (ch.classList.contains('nospoiler-blurred')) {
-        ch.classList.remove('nospoiler-blurred', 'nospoiler-blur-medium', 'nospoiler-blur-high', 'nospoiler-blur-blackout');
-        ch.classList.add('nospoiler-revealed');
-        ch.removeAttribute('data-nospoiler-blurred');
-      }
-      if (ch.style.filter) ch.style.filter = '';
-      if (ch.style.opacity) ch.style.opacity = '';
-    });
-
-    // 4. Resume video playback for Shorts
-    const mediaElements = container.querySelectorAll('video, audio');
-    mediaElements.forEach(media => {
+    // 3. Clear any blue text/element selection from the click
+    if (window.getSelection) {
       try {
-        media.muted = false;
-        delete media.dataset.nospoilerWasUnmuted;
-        delete media.dataset.nospoilerWasPlaying;
-        const playPromise = media.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(() => {});
-        }
+        window.getSelection().removeAllRanges();
       } catch (_) {}
-    });
+    }
+
+    // 4. Resume video playback for Shorts if paused by us
+    const isReel = container.tagName && container.tagName.toLowerCase() === 'ytd-reel-video-renderer';
+    if (isReel) {
+      const mediaElements = container.querySelectorAll('video, audio');
+      mediaElements.forEach(media => {
+        try {
+          if (media.dataset.nospoilerWasUnmuted === 'true') {
+            media.muted = false;
+            delete media.dataset.nospoilerWasUnmuted;
+          }
+          if (media.dataset.nospoilerWasPlaying === 'true') {
+            media.play().catch(() => {});
+            delete media.dataset.nospoilerWasPlaying;
+          }
+        } catch (_) {}
+      });
+    }
 
     // 5. Attach subtle "Hide" button in corner on reveal
     let rehideBtn = container.querySelector('.nospoiler-rehide-btn');
@@ -580,17 +582,7 @@
         rehideBtn.remove();
         delete container.dataset.nospoilerRevealedSrc;
         container.classList.remove('nospoiler-revealed');
-        container.classList.add('nospoiler-blurred', `nospoiler-blur-${settings.blurIntensity}`);
-        container.setAttribute('data-nospoiler-blurred', 'true');
-        const ov = container.querySelector('.nospoiler-overlay');
-        if (ov) ov.style.display = 'flex';
-        // If it's a Short, pause media again
-        const isReel = container.tagName && container.tagName.toLowerCase() === 'ytd-reel-video-renderer';
-        if (settings.muteMedia && isReel) {
-          mediaElements.forEach(m => {
-            try { m.pause(); m.muted = true; } catch (_) {}
-          });
-        }
+        blurElement(container, extractCardText(container));
       });
 
       container.appendChild(rehideBtn);
