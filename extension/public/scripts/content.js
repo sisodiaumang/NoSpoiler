@@ -34,7 +34,8 @@
         'ytd-video-renderer',           // Search result video
         'ytd-compact-video-renderer',   // Watch page sidebar related video
         'ytd-grid-video-renderer',      // Channel tab video
-        'ytd-reel-item-renderer',       // Shorts shelf item
+        'ytd-reel-item-renderer',       // Shorts shelf item (Home/Search)
+        'ytd-reel-video-renderer',      // Full-screen YouTube Shorts video player container
         'yt-lockup-view-model',         // Modern YouTube lockup item
         'ytd-rich-grid-slim-media',     // Slim media items
         'ytd-comment-thread-renderer',  // Individual comment thread
@@ -45,6 +46,7 @@
       // Elements that MUST NEVER be blurred
       blacklist: [
         'ytd-app', 'ytd-page-manager', 'ytd-browse', 'ytd-search', 'ytd-watch-flexy',
+        'ytd-shorts', '#shorts-container', '#shorts-inner-container',
         'ytd-rich-grid-renderer', 'ytd-rich-grid-row', 'ytd-rich-section-renderer',
         'ytd-section-list-renderer', 'ytd-item-section-renderer', 'ytd-feed-filter-chip-bar-renderer',
         'yt-chip-cloud-chip-renderer', 'yt-chip-cloud-renderer', 'iron-selector',
@@ -210,6 +212,15 @@
       }
     }
 
+    // If it explicitly matches one of the designated platform card selectors, it's valid!
+    if (currentPlatform && currentPlatform.containers) {
+      for (const sel of currentPlatform.containers) {
+        try {
+          if (el.matches && el.matches(sel)) return true;
+        } catch (_) {}
+      }
+    }
+
     // Never blur elements that span almost the entire screen or multiple grid items
     const rect = el.getBoundingClientRect();
     if (rect.height > window.innerHeight * 0.85 && rect.width > window.innerWidth * 0.75) {
@@ -234,6 +245,12 @@
       return null;
     }
 
+    // Special check for YouTube Shorts player page: ALWAYS target the full short container
+    if (currentPlatform && currentPlatform.name === 'youtube') {
+      const reelVideo = element.closest('ytd-reel-video-renderer');
+      if (reelVideo) return reelVideo;
+    }
+
     // 1. Check Platform-Specific Item Containers (e.g. YouTube video card, Tweet card)
     if (currentPlatform && currentPlatform.containers) {
       for (const selector of currentPlatform.containers) {
@@ -244,7 +261,12 @@
           }
         } catch (_) {}
       }
-      // If we are on YouTube/Twitter/Reddit but didn't find the known card, DO NOT blur a generic div!
+      // If we are on YouTube Shorts, NEVER fallback to a tiny title link
+      if (window.location.pathname.includes('/shorts')) {
+        const activeShort = document.querySelector('ytd-reel-video-renderer[is-active]') || document.querySelector('ytd-reel-video-renderer');
+        if (activeShort) return activeShort;
+      }
+
       // Fallback only to the direct title/block element containing the text:
       const tightBlock = element.closest('h1, h2, h3, h4, h5, h6, #video-title, p, a');
       if (tightBlock && isValidContainer(tightBlock)) {
@@ -483,13 +505,21 @@
     if (!card || card.classList.contains('nospoiler-blurred') || card.closest('.nospoiler-blurred')) return;
     if (card.hasAttribute('data-nospoiler-ignore')) return;
 
-    // 1. YouTube Video Card
+    // 1. YouTube Video Card & Shorts Video Player
     if (currentPlatform && currentPlatform.name === 'youtube') {
-      const titleEl = card.querySelector('#video-title, .yt-core-attributed-string, yt-formatted-string#video-title, #content-text');
+      const titleEl = card.querySelector('#video-title, .yt-core-attributed-string, yt-formatted-string#video-title, #content-text, h2.title, yt-formatted-string.title, #headline, .reel-player-header-headline, ytd-reel-player-header-renderer');
       const title = titleEl ? (titleEl.textContent || titleEl.getAttribute('title') || titleEl.getAttribute('aria-label') || '') : '';
       const thumb = card.querySelector('a#thumbnail, ytd-thumbnail, ytd-moving-thumbnail-renderer');
       const thumbLabel = thumb ? (thumb.getAttribute('aria-label') || thumb.getAttribute('title') || '') : '';
-      const cardText = `${title} ${thumbLabel}`.trim();
+
+      // Also gather all formatted strings inside overlay or header (critical for Shorts!)
+      let extraText = '';
+      const overlayTexts = card.querySelectorAll('ytd-reel-player-header-renderer yt-formatted-string, #headline yt-formatted-string, #description yt-formatted-string, ytd-reel-player-overlay-renderer yt-formatted-string');
+      overlayTexts.forEach(el => {
+        extraText += ' ' + (el.textContent || '');
+      });
+
+      const cardText = `${title} ${thumbLabel} ${extraText}`.trim();
 
       if (cardText && compiledRegex.test(cardText)) {
         blurElement(card, cardText);
@@ -651,6 +681,12 @@
       } catch (_) {}
     }
 
+    // Special pass for YouTube Shorts active video player
+    if (window.location.pathname.includes('/shorts')) {
+      const shorts = document.querySelectorAll('ytd-reel-video-renderer');
+      shorts.forEach(s => inspectCard(s));
+    }
+
     // 2. TreeWalker fallback
     const root = document.body || document.documentElement;
     if (!root) return;
@@ -658,7 +694,7 @@
     scanNodeAndSubtree(root);
   }
 
-  // MutationObserver to catch dynamically loaded content on scroll
+  // MutationObserver to catch dynamically loaded content on scroll & Shorts switching
   const observer = new MutationObserver((mutations) => {
     if (!settings.enabled || !compiledRegex) return;
 
@@ -674,6 +710,10 @@
         }
       } else if (mutation.type === 'characterData') {
         queueNodeForScan(mutation.target);
+      } else if (mutation.type === 'attributes') {
+        if (mutation.target.nodeType === Node.ELEMENT_NODE) {
+          queueNodeForScan(mutation.target);
+        }
       }
     }
   });
@@ -699,6 +739,20 @@
     }, 60);
   }, { passive: true });
 
+  // YouTube Shorts keyboard navigation (ArrowUp, ArrowDown, 'j', 'k', PageDown, PageUp)
+  window.addEventListener('keydown', (e) => {
+    if (['ArrowDown', 'ArrowUp', 'j', 'k', 'PageDown', 'PageUp'].includes(e.key)) {
+      setTimeout(scanFullDocument, 80);
+    }
+  });
+
+  // YouTube Shorts wheel navigation
+  window.addEventListener('wheel', () => {
+    if (window.location.pathname.includes('/shorts')) {
+      setTimeout(scanFullDocument, 100);
+    }
+  }, { passive: true });
+
   // YouTube SPA Navigation Hooks
   window.addEventListener('yt-navigate-finish', () => {
     setTimeout(scanFullDocument, 80);
@@ -710,13 +764,15 @@
     setTimeout(scanFullDocument, 80);
   });
 
-  // Start observing
+  // Start observing (with attribute monitoring for Shorts is-active toggles)
   function startObserver() {
     const target = document.documentElement || document;
     observer.observe(target, {
       childList: true,
       subtree: true,
-      characterData: true
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['is-active', 'id']
     });
   }
 
