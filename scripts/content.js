@@ -47,6 +47,7 @@
         'ytd-app', 'ytd-page-manager', 'ytd-browse', 'ytd-search', 'ytd-watch-flexy',
         'ytd-rich-grid-renderer', 'ytd-rich-grid-row', 'ytd-rich-section-renderer',
         'ytd-section-list-renderer', 'ytd-item-section-renderer', 'ytd-feed-filter-chip-bar-renderer',
+        'yt-chip-cloud-chip-renderer', 'yt-chip-cloud-renderer', 'iron-selector',
         '#page-manager', '#primary', '#secondary', '#columns', '#contents', '#chips-wrapper',
         '#guide', '#header', '#masthead-container', 'ytd-masthead'
       ]
@@ -245,7 +246,7 @@
       }
       // If we are on YouTube/Twitter/Reddit but didn't find the known card, DO NOT blur a generic div!
       // Fallback only to the direct title/block element containing the text:
-      const tightBlock = element.closest('h1, h2, h3, h4, h5, h6, #video-title, yt-formatted-string, p, a');
+      const tightBlock = element.closest('h1, h2, h3, h4, h5, h6, #video-title, p, a');
       if (tightBlock && isValidContainer(tightBlock)) {
         return tightBlock;
       }
@@ -271,11 +272,46 @@
     return null;
   }
 
+  // Detect whether the current website / container is using dark mode or light mode
+  function detectSiteTheme(element) {
+    try {
+      // 1. YouTube specific dark mode detection
+      if (document.documentElement.hasAttribute('dark')) return 'dark';
+      if (document.documentElement.classList.contains('dark') || (document.body && document.body.classList.contains('dark'))) return 'dark';
+
+      // 2. Element or body background luminance
+      let target = element || document.body;
+      let bg = '';
+      while (target && target !== document.documentElement) {
+        const computed = window.getComputedStyle(target);
+        if (computed && computed.backgroundColor && computed.backgroundColor !== 'transparent' && computed.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+          bg = computed.backgroundColor;
+          break;
+        }
+        target = target.parentElement;
+      }
+
+      if (bg) {
+        const rgb = bg.match(/\d+/g);
+        if (rgb && rgb.length >= 3) {
+          const brightness = (Number(rgb[0]) * 299 + Number(rgb[1]) * 587 + Number(rgb[2]) * 114) / 1000;
+          return brightness < 128 ? 'dark' : 'light';
+        }
+      }
+
+      // 3. System preference fallback
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        return 'light';
+      }
+    } catch (_) {}
+    return 'dark';
+  }
+
   // SVG shield icon for overlay
   const SHIELD_SVG = `
     <svg class="nospoiler-badge-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M12 2L4 5V11.09C4 16.14 7.41 20.85 12 22C16.59 20.85 20 16.14 20 11.09V5L12 2Z" fill="currentColor"/>
-      <path d="M12 7V17M8 12H16" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/>
+      <path d="M12 7V17M8 12H16" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
     </svg>
   `;
 
@@ -287,11 +323,13 @@
     if (!isValidContainer(container)) return;
 
     const matchedKeyword = findMatchedKeyword(matchedText);
+    const theme = detectSiteTheme(container);
 
-    // Mark as blurred
+    // Mark as blurred with theme
     container.classList.add('nospoiler-container', 'nospoiler-blurred');
     container.classList.add(`nospoiler-blur-${settings.blurIntensity}`);
     container.setAttribute('data-nospoiler-blurred', 'true');
+    container.setAttribute('data-nospoiler-theme', theme);
 
     // Pause / Mute media if playing inside this specific card
     if (settings.muteMedia) {
@@ -314,6 +352,7 @@
     const overlay = document.createElement('div');
     overlay.className = 'nospoiler-overlay';
     overlay.setAttribute('data-nospoiler-ignore', 'true');
+    overlay.setAttribute('data-nospoiler-theme', theme);
 
     // Check if container is compact (e.g. small shorts tile or single comment)
     const rect = container.getBoundingClientRect();
