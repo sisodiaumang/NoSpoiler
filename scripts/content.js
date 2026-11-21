@@ -515,19 +515,42 @@
   function revealElement(container) {
     if (!container) return;
 
-    container.classList.remove(
-      'nospoiler-blurred',
-      'nospoiler-blur-medium',
-      'nospoiler-blur-high',
-      'nospoiler-blur-blackout'
-    );
-    container.classList.add('nospoiler-revealed');
+    // 1. Remove blurred classes from container and any descendants
+    const allContainers = [container, ...container.querySelectorAll('.nospoiler-container, [data-nospoiler-blurred]')];
+    allContainers.forEach(c => {
+      c.classList.remove(
+        'nospoiler-blurred',
+        'nospoiler-blur-medium',
+        'nospoiler-blur-high',
+        'nospoiler-blur-blackout'
+      );
+      c.classList.add('nospoiler-revealed');
+      c.removeAttribute('data-nospoiler-blurred');
+    });
 
-    // Hide the overlay element completely so content is 100% visible
-    const overlay = container.querySelector('.nospoiler-overlay');
-    if (overlay) overlay.style.display = 'none';
+    // Record revealed video src for Shorts so recycled check knows it was user-revealed
+    const video = container.querySelector('video');
+    container.dataset.nospoilerRevealedSrc = video ? (video.currentSrc || video.src || 'revealed') : 'revealed';
 
-    // Resume video playback for Shorts
+    // 2. Hide all overlays completely
+    const overlays = container.querySelectorAll('.nospoiler-overlay');
+    overlays.forEach(ov => {
+      ov.style.display = 'none';
+    });
+
+    // 3. Clear any direct inline filters/opacity on descendants
+    const directChildren = container.querySelectorAll('*');
+    directChildren.forEach(ch => {
+      if (ch.classList.contains('nospoiler-blurred')) {
+        ch.classList.remove('nospoiler-blurred', 'nospoiler-blur-medium', 'nospoiler-blur-high', 'nospoiler-blur-blackout');
+        ch.classList.add('nospoiler-revealed');
+        ch.removeAttribute('data-nospoiler-blurred');
+      }
+      if (ch.style.filter) ch.style.filter = '';
+      if (ch.style.opacity) ch.style.opacity = '';
+    });
+
+    // 4. Resume video playback for Shorts
     const mediaElements = container.querySelectorAll('video, audio');
     mediaElements.forEach(media => {
       try {
@@ -541,7 +564,7 @@
       } catch (_) {}
     });
 
-    // Attach subtle "Hide" button in corner on reveal
+    // 5. Attach subtle "Hide" button in corner on reveal
     let rehideBtn = container.querySelector('.nospoiler-rehide-btn');
     if (!rehideBtn) {
       rehideBtn = document.createElement('button');
@@ -555,9 +578,19 @@
         e.stopPropagation();
         e.preventDefault();
         rehideBtn.remove();
+        delete container.dataset.nospoilerRevealedSrc;
         container.classList.remove('nospoiler-revealed');
         container.classList.add('nospoiler-blurred', `nospoiler-blur-${settings.blurIntensity}`);
-        if (overlay) overlay.style.display = 'flex';
+        container.setAttribute('data-nospoiler-blurred', 'true');
+        const ov = container.querySelector('.nospoiler-overlay');
+        if (ov) ov.style.display = 'flex';
+        // If it's a Short, pause media again
+        const isReel = container.tagName && container.tagName.toLowerCase() === 'ytd-reel-video-renderer';
+        if (settings.muteMedia && isReel) {
+          mediaElements.forEach(m => {
+            try { m.pause(); m.muted = true; } catch (_) {}
+          });
+        }
       });
 
       container.appendChild(rehideBtn);
@@ -697,6 +730,23 @@
     const isBlurred = card.classList.contains('nospoiler-blurred');
     const isRevealed = card.classList.contains('nospoiler-revealed');
 
+    // If card was revealed by the user:
+    if (isRevealed) {
+      if (!isReel) {
+        // Regular video cards (Home, Search, Channels, Twitter, Reddit) must STAY revealed!
+        return;
+      }
+      // For Shorts: check if it's the exact same Short video that was revealed
+      const video = card.querySelector('video');
+      const currentSrc = video ? (video.currentSrc || video.src || '') : '';
+      if (card.dataset.nospoilerRevealedSrc && card.dataset.nospoilerRevealedSrc === currentSrc) {
+        return;
+      }
+      // New Short video arrived in recycled container: clear revealed state
+      delete card.dataset.nospoilerRevealedSrc;
+      card.classList.remove('nospoiler-revealed');
+    }
+
     // If signature hasn't changed at all, state is already up-to-date
     if (lastSignature === cardSignature) {
       return;
@@ -710,13 +760,9 @@
     const hasSpoiler = cardText.length > 0 && compiledRegex.test(cardText);
 
     if (hasSpoiler) {
-      if (isRevealed) {
-        // Content changed on a recycled node to a new spoiler! Re-blur it.
-        unblurElement(card);
+      if (!isBlurred && !card.classList.contains('nospoiler-revealed')) {
         blurElement(card, cardText);
-      } else if (!isBlurred) {
-        blurElement(card, cardText);
-      } else {
+      } else if (isBlurred) {
         // Already blurred, update keyword tag if keyword changed
         const matched = findMatchedKeyword(cardText);
         const tag = card.querySelector('.nospoiler-keyword');

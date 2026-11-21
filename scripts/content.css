@@ -182,16 +182,19 @@
   overflow: visible !important;
 }
 
-.nospoiler-container.nospoiler-revealed > * {
+.nospoiler-container.nospoiler-revealed,
+.nospoiler-container.nospoiler-revealed * {
   filter: none !important;
   opacity: 1 !important;
   pointer-events: auto !important;
   user-select: auto !important;
-  transition: filter 0.2s ease, opacity 0.2s ease !important;
 }
 
 .nospoiler-container.nospoiler-revealed .nospoiler-overlay {
   display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 /* RE-HIDE BUTTON: NEVER show when element is hidden/blurred */
