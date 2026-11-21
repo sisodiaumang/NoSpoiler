@@ -473,52 +473,130 @@
     } catch (_) {}
   }
 
-  // Scan a node for matching keywords
-  function inspectNode(node) {
-    if (!settings.enabled || !compiledRegex || !node) return;
+  // Inspect a specific card element (e.g. YouTube video card, Tweet, Reddit post)
+  function inspectCard(card) {
+    if (!card || card.classList.contains('nospoiler-blurred') || card.closest('.nospoiler-blurred')) return;
+    if (card.hasAttribute('data-nospoiler-ignore')) return;
 
-    // Skip ignored nodes, already blurred containers, scripts, styles, etc.
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      const tag = node.tagName.toLowerCase();
-      if (['script', 'style', 'noscript', 'meta', 'link', 'svg', 'iframe'].includes(tag)) {
+    // 1. YouTube Video Card
+    if (currentPlatform && currentPlatform.name === 'youtube') {
+      const titleEl = card.querySelector('#video-title, .yt-core-attributed-string, yt-formatted-string#video-title, #content-text');
+      const title = titleEl ? (titleEl.textContent || titleEl.getAttribute('title') || titleEl.getAttribute('aria-label') || '') : '';
+      const thumb = card.querySelector('a#thumbnail, ytd-thumbnail, ytd-moving-thumbnail-renderer');
+      const thumbLabel = thumb ? (thumb.getAttribute('aria-label') || thumb.getAttribute('title') || '') : '';
+      const cardText = `${title} ${thumbLabel}`.trim();
+
+      if (cardText && compiledRegex.test(cardText)) {
+        blurElement(card, cardText);
         return;
       }
-      if (node.hasAttribute('data-nospoiler-ignore') || node.classList.contains('nospoiler-container') || node.closest('.nospoiler-blurred')) {
+    }
+
+    // 2. Twitter / X Tweet Card
+    if (currentPlatform && currentPlatform.name === 'twitter') {
+      const tweetTextEl = card.querySelector('div[data-testid="tweetText"]');
+      const tweetText = tweetTextEl ? tweetTextEl.textContent : '';
+      if (tweetText && compiledRegex.test(tweetText)) {
+        blurElement(card, tweetText);
         return;
       }
+    }
 
-      // Check image alt or title attributes
-      const alt = node.getAttribute('alt') || '';
-      const aria = node.getAttribute('aria-label') || '';
-      const title = node.getAttribute('title') || '';
-      const attrText = `${alt} ${aria} ${title}`.trim();
+    // 3. Reddit Post Card
+    if (currentPlatform && currentPlatform.name === 'reddit') {
+      const titleEl = card.querySelector('[slot="title"], [data-testid="post-title"], h3');
+      const titleText = titleEl ? titleEl.textContent : '';
+      if (titleText && compiledRegex.test(titleText)) {
+        blurElement(card, titleText);
+        return;
+      }
+    }
+  }
 
-      if (attrText.length > 0 && compiledRegex.test(attrText)) {
-        const container = findBestContainer(node);
+  // Scan an added element and all its descendant text nodes
+  function scanNodeAndSubtree(root) {
+    if (!settings.enabled || !compiledRegex || !root) return;
+
+    if (root.nodeType === Node.TEXT_NODE) {
+      const parent = root.parentElement;
+      if (!parent) return;
+      const pTag = parent.tagName.toLowerCase();
+      if (['script', 'style', 'noscript', 'svg'].includes(pTag)) return;
+      if (parent.closest('[data-nospoiler-ignore="true"]') || parent.closest('.nospoiler-blurred')) return;
+
+      const text = root.textContent;
+      if (text && text.trim().length > 1 && compiledRegex.test(text)) {
+        const container = findBestContainer(root);
         if (container) {
-          blurElement(container, attrText);
+          blurElement(container, text);
         }
       }
       return;
     }
 
-    // Check text nodes ONLY (Never check concatenated textContent on parent element containers!)
-    if (node.nodeType === Node.TEXT_NODE) {
-      const parent = node.parentElement;
-      if (!parent) return;
+    if (root.nodeType !== Node.ELEMENT_NODE) return;
 
-      const pTag = parent.tagName.toLowerCase();
-      if (['script', 'style', 'noscript', 'svg'].includes(pTag)) {
-        return;
+    const tag = root.tagName.toLowerCase();
+    if (['script', 'style', 'noscript', 'svg', 'iframe'].includes(tag)) return;
+    if (root.hasAttribute('data-nospoiler-ignore') || root.classList.contains('nospoiler-container') || root.closest('.nospoiler-blurred')) return;
+
+    // Check if root is itself a card
+    if (currentPlatform && currentPlatform.containers) {
+      for (const selector of currentPlatform.containers) {
+        try {
+          if (root.matches && root.matches(selector)) {
+            inspectCard(root);
+            return;
+          }
+        } catch (_) {}
       }
 
-      if (parent.closest('[data-nospoiler-ignore="true"]') || parent.closest('.nospoiler-blurred')) {
+      // Check if root contains cards inside it (e.g. newly loaded row or grid)
+      try {
+        const selectorQuery = currentPlatform.containers.join(', ');
+        const cards = root.querySelectorAll(selectorQuery);
+        if (cards && cards.length > 0) {
+          cards.forEach(card => inspectCard(card));
+          return;
+        }
+      } catch (_) {}
+    }
+
+    // Fallback: check element attributes (img alt, aria-label, title)
+    const alt = root.getAttribute('alt') || '';
+    const aria = root.getAttribute('aria-label') || '';
+    const title = root.getAttribute('title') || '';
+    const attrText = `${alt} ${aria} ${title}`.trim();
+
+    if (attrText.length > 0 && compiledRegex.test(attrText)) {
+      const container = findBestContainer(root);
+      if (container) {
+        blurElement(container, attrText);
         return;
       }
+    }
 
-      const text = node.textContent;
+    // Walk descendant text nodes for generic sites
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode(n) {
+          const p = n.parentElement;
+          if (!p) return NodeFilter.FILTER_REJECT;
+          const t = p.tagName.toLowerCase();
+          if (['script', 'style', 'noscript', 'svg'].includes(t)) return NodeFilter.FILTER_REJECT;
+          if (p.closest('[data-nospoiler-ignore="true"]') || p.closest('.nospoiler-blurred')) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    let curr;
+    while ((curr = walker.nextNode())) {
+      const text = curr.textContent;
       if (text && text.trim().length > 1 && compiledRegex.test(text)) {
-        const container = findBestContainer(node);
+        const container = findBestContainer(curr);
         if (container) {
           blurElement(container, text);
         }
@@ -526,20 +604,20 @@
     }
   }
 
-  // Batch process accumulated nodes for smooth 60fps performance
+  // Batch process accumulated nodes right before browser paint (16ms / 60fps)
+  let rafId = null;
   function processPendingNodes() {
+    rafId = null;
     if (!settings.enabled || !compiledRegex || pendingNodes.size === 0) {
       pendingNodes.clear();
-      isScanning = false;
       return;
     }
 
     const nodes = Array.from(pendingNodes);
     pendingNodes.clear();
-    isScanning = false;
 
     for (const node of nodes) {
-      inspectNode(node);
+      scanNodeAndSubtree(node);
     }
   }
 
@@ -547,51 +625,35 @@
     if (!settings.enabled || !compiledRegex || !node) return;
     pendingNodes.add(node);
 
-    if (!isScanning) {
-      isScanning = true;
-      if (window.requestIdleCallback) {
-        window.requestIdleCallback(() => processPendingNodes(), { timeout: 100 });
-      } else {
-        clearTimeout(mutationTimeout);
-        mutationTimeout = setTimeout(processPendingNodes, 40);
-      }
+    if (!rafId) {
+      rafId = requestAnimationFrame(processPendingNodes);
     }
   }
 
-  // Full DOM scan using TreeWalker
+  // Full DOM scan
   function scanFullDocument() {
     if (!settings.enabled || !compiledRegex) return;
 
+    // 1. Direct platform card query (instant)
+    if (currentPlatform && currentPlatform.containers) {
+      try {
+        const selectorQuery = currentPlatform.containers.join(', ');
+        const cards = document.querySelectorAll(selectorQuery);
+        if (cards && cards.length > 0) {
+          cards.forEach(card => inspectCard(card));
+          return;
+        }
+      } catch (_) {}
+    }
+
+    // 2. TreeWalker fallback
     const root = document.body || document.documentElement;
     if (!root) return;
 
-    // Show Text nodes and Element nodes with attributes
-    const walker = document.createTreeWalker(
-      root,
-      NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-      {
-        acceptNode(n) {
-          if (n.nodeType === Node.ELEMENT_NODE) {
-            const tag = n.tagName.toLowerCase();
-            if (['script', 'style', 'noscript', 'svg', 'iframe'].includes(tag)) {
-              return NodeFilter.FILTER_REJECT;
-            }
-            if (n.hasAttribute('data-nospoiler-ignore') || n.classList.contains('nospoiler-blurred')) {
-              return NodeFilter.FILTER_REJECT;
-            }
-          }
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      }
-    );
-
-    let currentNode;
-    while ((currentNode = walker.nextNode())) {
-      inspectNode(currentNode);
-    }
+    scanNodeAndSubtree(root);
   }
 
-  // MutationObserver to catch dynamically loaded content
+  // MutationObserver to catch dynamically loaded content on scroll
   const observer = new MutationObserver((mutations) => {
     if (!settings.enabled || !compiledRegex) return;
 
@@ -609,6 +671,38 @@
         queueNodeForScan(mutation.target);
       }
     }
+  });
+
+  // Fast scroll listener: ensures infinite scroll cards are never missed
+  let scrollThrottle = null;
+  window.addEventListener('scroll', () => {
+    if (!settings.enabled || !compiledRegex) return;
+    if (scrollThrottle) return;
+    scrollThrottle = setTimeout(() => {
+      scrollThrottle = null;
+      if (currentPlatform && currentPlatform.containers) {
+        try {
+          const selectorQuery = currentPlatform.containers.join(', ');
+          const unblurred = document.querySelectorAll(selectorQuery);
+          unblurred.forEach(card => {
+            if (!card.classList.contains('nospoiler-blurred')) {
+              inspectCard(card);
+            }
+          });
+        } catch (_) {}
+      }
+    }, 60);
+  }, { passive: true });
+
+  // YouTube SPA Navigation Hooks
+  window.addEventListener('yt-navigate-finish', () => {
+    setTimeout(scanFullDocument, 80);
+  });
+  window.addEventListener('yt-page-data-updated', () => {
+    setTimeout(scanFullDocument, 80);
+  });
+  window.addEventListener('spfdone', () => {
+    setTimeout(scanFullDocument, 80);
   });
 
   // Start observing
