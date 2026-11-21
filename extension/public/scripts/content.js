@@ -137,7 +137,13 @@
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // Compile keywords into a high-performance single RegExp
+  // Sanitize text by stripping URLs so web links (like i.ytimg.com/vi/...) never match keywords
+  function cleanText(str) {
+    if (!str) return '';
+    return str.replace(/https?:\/\/[^\s]+/gi, ' ').replace(/\/[a-zA-Z0-9_-]+\/[^\s]+/g, ' ').trim();
+  }
+
+  // Compile keywords into a high-performance single RegExp with robust boundary checks
   function compileKeywords(keywords) {
     if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
       return null;
@@ -152,8 +158,9 @@
     const patterns = validKeywords.map(k => {
       const escaped = escapeRegExp(k);
       const flexible = escaped.replace(/\s+/g, '\\s+');
-      const startBoundary = /^\w/.test(k) ? '(?:^|\\W)' : '';
-      const endBoundary = /\w$/.test(k) ? '(?:$|\\W)' : '';
+      // Lookaround boundary checks: allows spaces, quotes, punctuation, brackets, but avoids URL slashes
+      const startBoundary = /^\w/.test(k) ? '(?<=^|[\\s"\'(\\[{<])' : '';
+      const endBoundary = /\w$/.test(k) ? '(?=$|[\\s"\'!?.,;:)}\\]>])' : '';
       return `${startBoundary}(${flexible})${endBoundary}`;
     });
 
@@ -636,7 +643,7 @@
       text = clone.textContent || '';
     }
 
-    return text.trim().replace(/\s+/g, ' ');
+    return cleanText(text).replace(/\s+/g, ' ');
   }
 
   // Inspect a specific card element (handles YouTube Shorts recycling & infinite scroll)
@@ -750,7 +757,7 @@
     const alt = root.getAttribute('alt') || '';
     const aria = root.getAttribute('aria-label') || '';
     const title = root.getAttribute('title') || '';
-    const attrText = `${alt} ${aria} ${title}`.trim();
+    const attrText = cleanText(`${alt} ${aria} ${title}`);
     if (attrText.length > 0 && compiledRegex.test(attrText)) {
       const container = findBestContainer(root);
       if (container) {
