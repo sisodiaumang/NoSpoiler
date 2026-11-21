@@ -40,7 +40,7 @@
   width: 100% !important;
   height: 100% !important;
   min-height: 40px !important;
-  z-index: 10 !important; /* Covers video player, titles, and controls inside the card */
+  z-index: 50 !important; /* Covers video player, titles, and controls inside the card */
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -209,9 +209,9 @@
 /* Floating Re-hide Button when revealed */
 .nospoiler-rehide-btn {
   position: absolute !important;
-  top: 8px !important;
-  right: 8px !important;
-  z-index: 3 !important;
+  top: 12px !important;
+  right: 12px !important;
+  z-index: 55 !important;
   display: flex !important;
   align-items: center !important;
   gap: 5px !important;
@@ -225,7 +225,7 @@
   cursor: pointer !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
   transition: all 0.2s ease !important;
-  opacity: 0.5 !important;
+  opacity: 0.7 !important;
 }
 
 .nospoiler-container:hover .nospoiler-rehide-btn {
@@ -236,6 +236,16 @@
   background: #383838 !important;
   color: #ffffff !important;
   transform: scale(1.04) !important;
+}
+
+/* YouTube Shorts specific styling: ensures overlay covers the player and doesn't spill */
+ytd-reel-video-renderer.nospoiler-container {
+  border-radius: 16px !important;
+  overflow: hidden !important;
+}
+
+ytd-reel-video-renderer.nospoiler-container .nospoiler-overlay {
+  z-index: 50 !important;
 }
 
 @keyframes nospoilerFadeIn {

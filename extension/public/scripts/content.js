@@ -2,6 +2,7 @@
  * NoSpoiler - Content Script
  * Scans web content & social media feeds, blurring spoilers based on user-defined keywords.
  * Precisely targets individual video cards, tweets, and posts without affecting outer page layouts.
+ * Seamlessly handles YouTube Shorts DOM element recycling and infinite scroll.
  */
 
 (() => {
@@ -20,9 +21,8 @@
 
   let compiledRegex = null;
   let tabBlurredCount = 0;
-  let isScanning = false;
   let pendingNodes = new Set();
-  let mutationTimeout = null;
+  let rafId = null;
 
   // Platform-specific container and text selectors
   const PLATFORMS = [
@@ -43,7 +43,7 @@
         'ytd-post-renderer',            // Community post
         'ytd-playlist-video-renderer'   // Playlist item
       ],
-      // Elements that MUST NEVER be blurred
+      // Elements that MUST NEVER be blurred as a whole
       blacklist: [
         'ytd-app', 'ytd-page-manager', 'ytd-browse', 'ytd-search', 'ytd-watch-flexy',
         'ytd-shorts', '#shorts-container', '#shorts-inner-container',
@@ -149,7 +149,6 @@
 
     if (validKeywords.length === 0) return null;
 
-    // Build regex patterns
     const patterns = validKeywords.map(k => {
       const escaped = escapeRegExp(k);
       const flexible = escaped.replace(/\s+/g, '\\s+');
@@ -221,13 +220,13 @@
       }
     }
 
-    // Never blur elements that span almost the entire screen or multiple grid items
+    // Never blur generic elements that span almost the entire screen or multiple grid items
     const rect = el.getBoundingClientRect();
     if (rect.height > window.innerHeight * 0.85 && rect.width > window.innerWidth * 0.75) {
       return false;
     }
 
-    // Never blur containers that contain more than 8 other major child elements
+    // Never blur containers that contain more than 25 other major child elements
     if (el.children.length > 25) {
       return false;
     }
@@ -245,10 +244,21 @@
       return null;
     }
 
-    // Special check for YouTube Shorts player page: ALWAYS target the full short container
+    // Special check for YouTube:
     if (currentPlatform && currentPlatform.name === 'youtube') {
+      // 1. Comments: target individual comment, never the whole video
+      const commentEl = element.closest('ytd-comment-view-model, ytd-comment-thread-renderer');
+      if (commentEl) return commentEl;
+
+      // 2. Shorts video player: target the specific short reel renderer
       const reelVideo = element.closest('ytd-reel-video-renderer');
-      if (reelVideo) return reelVideo;
+      if (reelVideo) {
+        // If it's inside comments engagement panel but not a single comment, ignore
+        if (element.closest('ytd-engagement-panel-section-list-renderer, #comments, #engagement-panel-comments-section')) {
+          return null;
+        }
+        return reelVideo;
+      }
     }
 
     // 1. Check Platform-Specific Item Containers (e.g. YouTube video card, Tweet card)
@@ -260,11 +270,6 @@
             return container;
           }
         } catch (_) {}
-      }
-      // If we are on YouTube Shorts, NEVER fallback to a tiny title link
-      if (window.location.pathname.includes('/shorts')) {
-        const activeShort = document.querySelector('ytd-reel-video-renderer[is-active]') || document.querySelector('ytd-reel-video-renderer');
-        if (activeShort) return activeShort;
       }
 
       // Fallback only to the direct title/block element containing the text:
@@ -297,11 +302,9 @@
   // Detect whether the current website / container is using dark mode or light mode
   function detectSiteTheme(element) {
     try {
-      // 1. YouTube specific dark mode detection
       if (document.documentElement.hasAttribute('dark')) return 'dark';
       if (document.documentElement.classList.contains('dark') || (document.body && document.body.classList.contains('dark'))) return 'dark';
 
-      // 2. Element or body background luminance
       let target = element || document.body;
       let bg = '';
       while (target && target !== document.documentElement) {
@@ -321,7 +324,6 @@
         }
       }
 
-      // 3. System preference fallback
       if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
         return 'light';
       }
@@ -339,13 +341,33 @@
 
   // Apply blur to an individual element
   function blurElement(container, matchedText) {
-    if (!container || container.classList.contains('nospoiler-blurred')) return;
+    if (!container) return;
+
+    // If already blurred, simply update the keyword badge if needed
+    if (container.classList.contains('nospoiler-blurred')) {
+      const matchedKeyword = findMatchedKeyword(matchedText);
+      const tag = container.querySelector('.nospoiler-keyword-tag');
+      if (tag) {
+        tag.textContent = `"${matchedKeyword}"`;
+        tag.title = `Matched keyword: ${matchedKeyword}`;
+      }
+      return;
+    }
 
     // Double check we're not blurring an entire page or layout
     if (!isValidContainer(container)) return;
 
     const matchedKeyword = findMatchedKeyword(matchedText);
     const theme = detectSiteTheme(container);
+
+    // If element position is static, set relative so overlay covers it accurately
+    try {
+      const computedPos = window.getComputedStyle(container).position;
+      if (computedPos === 'static') {
+        container.style.position = 'relative';
+        container.dataset.nospoilerSetPosition = 'true';
+      }
+    } catch (_) {}
 
     // Mark as blurred with theme
     container.classList.add('nospoiler-container', 'nospoiler-blurred');
@@ -370,57 +392,113 @@
       });
     }
 
-    // Create Frosted Glass Overlay
-    const overlay = document.createElement('div');
-    overlay.className = 'nospoiler-overlay';
-    overlay.setAttribute('data-nospoiler-ignore', 'true');
-    overlay.setAttribute('data-nospoiler-theme', theme);
+    // Create or re-use Frosted Glass Overlay
+    let overlay = container.querySelector('.nospoiler-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'nospoiler-overlay';
+      overlay.setAttribute('data-nospoiler-ignore', 'true');
+      overlay.setAttribute('data-nospoiler-theme', theme);
 
-    // Check if container is compact (e.g. small shorts tile or single comment)
-    const rect = container.getBoundingClientRect();
-    const isCompact = rect.height > 0 && rect.height < 90;
-    if (isCompact) {
-      overlay.classList.add('nospoiler-compact');
-    }
+      // Check if container is compact
+      const rect = container.getBoundingClientRect();
+      const isCompact = rect.height > 0 && rect.height < 90;
+      if (isCompact) {
+        overlay.classList.add('nospoiler-compact');
+      }
 
-    overlay.innerHTML = `
-      <div class="nospoiler-badge" data-nospoiler-ignore="true">
-        <div class="nospoiler-badge-header" data-nospoiler-ignore="true">
-          ${SHIELD_SVG}
-          <span class="nospoiler-title" data-nospoiler-ignore="true">Spoiler Blocked</span>
-        </div>
-        <div class="nospoiler-keyword-tag" title="Matched keyword: ${matchedKeyword}" data-nospoiler-ignore="true">
-          "${matchedKeyword}"
-        </div>
-        ${settings.revealOnClick ? `
-          <div class="nospoiler-reveal-hint" data-nospoiler-ignore="true">
-            <span>👁️</span> Click to reveal
+      overlay.innerHTML = `
+        <div class="nospoiler-badge" data-nospoiler-ignore="true">
+          <div class="nospoiler-badge-header" data-nospoiler-ignore="true">
+            ${SHIELD_SVG}
+            <span class="nospoiler-title" data-nospoiler-ignore="true">Spoiler Blocked</span>
           </div>
-        ` : ''}
-      </div>
-    `;
+          <div class="nospoiler-keyword-tag" title="Matched keyword: ${matchedKeyword}" data-nospoiler-ignore="true">
+            "${matchedKeyword}"
+          </div>
+          ${settings.revealOnClick ? `
+            <div class="nospoiler-reveal-hint" data-nospoiler-ignore="true">
+              <span>👁️</span> Click to reveal
+            </div>
+          ` : ''}
+        </div>
+      `;
 
-    // Click to Reveal handler
-    if (settings.revealOnClick) {
-      overlay.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        revealElement(container);
-      });
+      if (settings.revealOnClick) {
+        overlay.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          revealElement(container);
+        });
+      }
+
+      container.appendChild(overlay);
+    } else {
+      overlay.setAttribute('data-nospoiler-theme', theme);
+      const tag = overlay.querySelector('.nospoiler-keyword-tag');
+      if (tag) {
+        tag.textContent = `"${matchedKeyword}"`;
+        tag.title = `Matched keyword: ${matchedKeyword}`;
+      }
     }
-
-    container.appendChild(overlay);
 
     tabBlurredCount++;
     notifyBadgeUpdate();
 
-    // Increment overall statistics
     try {
       chrome.runtime.sendMessage({ type: 'INCREMENT_BLOCKED_COUNT', amount: 1 });
     } catch (_) {}
   }
 
-  // Reveal a previously blurred container
+  // Completely unblur an element (critical for YouTube Shorts DOM recycling)
+  function unblurElement(container) {
+    if (!container) return;
+
+    const wasBlurred = container.classList.contains('nospoiler-blurred');
+
+    container.classList.remove(
+      'nospoiler-container',
+      'nospoiler-blurred',
+      'nospoiler-revealed',
+      'nospoiler-blur-medium',
+      'nospoiler-blur-high',
+      'nospoiler-blur-blackout'
+    );
+    container.removeAttribute('data-nospoiler-blurred');
+    container.removeAttribute('data-nospoiler-theme');
+    delete container.dataset.nospoilerSignature;
+
+    if (container.dataset.nospoilerSetPosition === 'true') {
+      container.style.position = '';
+      delete container.dataset.nospoilerSetPosition;
+    }
+
+    // Remove overlay and rehide button
+    const overlays = container.querySelectorAll('.nospoiler-overlay, .nospoiler-rehide-btn');
+    overlays.forEach(o => o.remove());
+
+    // Restore media if it was muted by us
+    const mediaElements = container.querySelectorAll('video, audio');
+    mediaElements.forEach(media => {
+      try {
+        if (media.dataset.nospoilerWasUnmuted === 'true') {
+          media.muted = false;
+          delete media.dataset.nospoilerWasUnmuted;
+        }
+        if (media.dataset.nospoilerWasPlaying === 'true') {
+          media.play().catch(() => {});
+          delete media.dataset.nospoilerWasPlaying;
+        }
+      } catch (_) {}
+    });
+
+    if (wasBlurred && tabBlurredCount > 0) {
+      tabBlurredCount--;
+      notifyBadgeUpdate();
+    }
+  }
+
+  // Reveal a previously blurred container when user clicks
   function revealElement(container) {
     if (!container) return;
 
@@ -468,22 +546,11 @@
     }
   }
 
-  // Remove blur completely (e.g. when keyword is deleted or extension disabled)
+  // Remove blur completely from the entire page
   function unblurAll() {
-    const blurred = document.querySelectorAll('.nospoiler-container');
+    const blurred = document.querySelectorAll('.nospoiler-container, [data-nospoiler-blurred]');
     blurred.forEach(container => {
-      container.classList.remove(
-        'nospoiler-container',
-        'nospoiler-blurred',
-        'nospoiler-revealed',
-        'nospoiler-blur-medium',
-        'nospoiler-blur-high',
-        'nospoiler-blur-blackout'
-      );
-      container.removeAttribute('data-nospoiler-blurred');
-
-      const overlays = container.querySelectorAll('.nospoiler-overlay, .nospoiler-rehide-btn');
-      overlays.forEach(o => o.remove());
+      unblurElement(container);
     });
 
     tabBlurredCount = 0;
@@ -500,50 +567,126 @@
     } catch (_) {}
   }
 
-  // Inspect a specific card element (e.g. YouTube video card, Tweet, Reddit post)
+  // Build a distinct signature for a YouTube Short video inside a ytd-reel-video-renderer
+  function getShortSignature(card) {
+    if (!card) return '';
+    const headline = card.querySelector('#headline, .reel-player-header-headline, h2.title, yt-formatted-string.title')?.textContent?.trim() || '';
+    const channel = card.querySelector('ytd-channel-name, #channel-name, .ytd-channel-name')?.textContent?.trim() || '';
+    const video = card.querySelector('video');
+    const videoSrc = video ? (video.currentSrc || video.src || '') : '';
+    const cardId = card.getAttribute('id') || '';
+    return `${headline}__${channel}__${cardId}__${videoSrc.slice(-30)}`;
+  }
+
+  // Extract clean text from a card without polluting with our own overlay or badge
+  function extractCardText(card) {
+    if (!card) return '';
+    let text = '';
+
+    if (currentPlatform && currentPlatform.name === 'youtube') {
+      const isReel = card.tagName.toLowerCase() === 'ytd-reel-video-renderer';
+
+      if (isReel) {
+        // Shorts player: check headline, sound, description (exclude comments and our overlay!)
+        const headline = card.querySelector('#headline, .reel-player-header-headline, h2.title, yt-formatted-string.title');
+        if (headline) {
+          text += ' ' + (headline.textContent || headline.getAttribute('title') || '');
+        }
+        const header = card.querySelector('ytd-reel-player-header-renderer');
+        if (header) {
+          const sound = header.querySelector('.reel-player-header-sound-metadata');
+          if (sound) text += ' ' + sound.textContent;
+          const channel = header.querySelector('ytd-channel-name, #channel-name');
+          if (channel) text += ' ' + channel.textContent;
+        }
+        const desc = card.querySelector('#description, .ytd-reel-player-overlay-renderer #description');
+        if (desc) {
+          text += ' ' + (desc.textContent || '');
+        }
+      } else {
+        // Regular video card
+        const titleEl = card.querySelector('#video-title, .yt-core-attributed-string, yt-formatted-string#video-title, h2.title, yt-formatted-string.title, a#video-title-link');
+        if (titleEl) {
+          text += ' ' + (titleEl.textContent || titleEl.getAttribute('title') || titleEl.getAttribute('aria-label') || '');
+        }
+        const thumb = card.querySelector('a#thumbnail, ytd-thumbnail, ytd-moving-thumbnail-renderer');
+        if (thumb) {
+          text += ' ' + (thumb.getAttribute('aria-label') || thumb.getAttribute('title') || '');
+        }
+        const desc = card.querySelector('#description-text, #content-text');
+        if (desc) {
+          text += ' ' + (desc.textContent || '');
+        }
+        const channel = card.querySelector('#channel-name, ytd-channel-name');
+        if (channel) {
+          text += ' ' + (channel.textContent || '');
+        }
+      }
+    } else if (currentPlatform && currentPlatform.name === 'twitter') {
+      const tweetEl = card.querySelector('div[data-testid="tweetText"]');
+      if (tweetEl) text += ' ' + tweetEl.textContent;
+    } else if (currentPlatform && currentPlatform.name === 'reddit') {
+      const titleEl = card.querySelector('[slot="title"], [data-testid="post-title"], h3');
+      if (titleEl) text += ' ' + titleEl.textContent;
+    } else {
+      // Generic card
+      const clone = card.cloneNode(true);
+      const ignores = clone.querySelectorAll('[data-nospoiler-ignore], .nospoiler-overlay, .nospoiler-rehide-btn');
+      ignores.forEach(ig => ig.remove());
+      text = clone.textContent || '';
+    }
+
+    return text.trim().replace(/\s+/g, ' ');
+  }
+
+  // Inspect a specific card element (handles YouTube Shorts recycling & infinite scroll)
   function inspectCard(card) {
-    if (!card || card.classList.contains('nospoiler-blurred') || card.closest('.nospoiler-blurred')) return;
+    if (!card || !settings.enabled || !compiledRegex) return;
     if (card.hasAttribute('data-nospoiler-ignore')) return;
 
-    // 1. YouTube Video Card & Shorts Video Player
-    if (currentPlatform && currentPlatform.name === 'youtube') {
-      const titleEl = card.querySelector('#video-title, .yt-core-attributed-string, yt-formatted-string#video-title, #content-text, h2.title, yt-formatted-string.title, #headline, .reel-player-header-headline, ytd-reel-player-header-renderer');
-      const title = titleEl ? (titleEl.textContent || titleEl.getAttribute('title') || titleEl.getAttribute('aria-label') || '') : '';
-      const thumb = card.querySelector('a#thumbnail, ytd-thumbnail, ytd-moving-thumbnail-renderer');
-      const thumbLabel = thumb ? (thumb.getAttribute('aria-label') || thumb.getAttribute('title') || '') : '';
+    const isReel = card.tagName.toLowerCase() === 'ytd-reel-video-renderer';
+    const cardSignature = isReel ? getShortSignature(card) : extractCardText(card);
 
-      // Also gather all formatted strings inside overlay or header (critical for Shorts!)
-      let extraText = '';
-      const overlayTexts = card.querySelectorAll('ytd-reel-player-header-renderer yt-formatted-string, #headline yt-formatted-string, #description yt-formatted-string, ytd-reel-player-overlay-renderer yt-formatted-string');
-      overlayTexts.forEach(el => {
-        extraText += ' ' + (el.textContent || '');
-      });
+    // If card has no readable content yet (DOM still rendering), do nothing
+    if (!cardSignature || cardSignature.length < 2) return;
 
-      const cardText = `${title} ${thumbLabel} ${extraText}`.trim();
+    const lastSignature = card.dataset.nospoilerSignature;
+    const isBlurred = card.classList.contains('nospoiler-blurred');
+    const isRevealed = card.classList.contains('nospoiler-revealed');
 
-      if (cardText && compiledRegex.test(cardText)) {
+    // If signature hasn't changed at all, state is already up-to-date
+    if (lastSignature === cardSignature) {
+      return;
+    }
+
+    // Record the current signature
+    card.dataset.nospoilerSignature = cardSignature;
+
+    // Extract text to check for spoiler keywords
+    const cardText = extractCardText(card);
+    const hasSpoiler = cardText.length > 0 && compiledRegex.test(cardText);
+
+    if (hasSpoiler) {
+      if (isRevealed) {
+        // Content changed on a recycled node to a new spoiler! Re-blur it.
+        unblurElement(card);
         blurElement(card, cardText);
-        return;
+      } else if (!isBlurred) {
+        blurElement(card, cardText);
+      } else {
+        // Already blurred, update keyword tag if keyword changed
+        const matched = findMatchedKeyword(cardText);
+        const tag = card.querySelector('.nospoiler-keyword-tag');
+        if (tag) {
+          tag.textContent = `"${matched}"`;
+          tag.title = `Matched keyword: ${matched}`;
+        }
       }
-    }
-
-    // 2. Twitter / X Tweet Card
-    if (currentPlatform && currentPlatform.name === 'twitter') {
-      const tweetTextEl = card.querySelector('div[data-testid="tweetText"]');
-      const tweetText = tweetTextEl ? tweetTextEl.textContent : '';
-      if (tweetText && compiledRegex.test(tweetText)) {
-        blurElement(card, tweetText);
-        return;
-      }
-    }
-
-    // 3. Reddit Post Card
-    if (currentPlatform && currentPlatform.name === 'reddit') {
-      const titleEl = card.querySelector('[slot="title"], [data-testid="post-title"], h3');
-      const titleText = titleEl ? titleEl.textContent : '';
-      if (titleText && compiledRegex.test(titleText)) {
-        blurElement(card, titleText);
-        return;
+    } else {
+      // Content is clean (no spoiler!)
+      if (isBlurred || isRevealed) {
+        // DOM node was recycled from a spoiler to a non-spoiler video: UNBLUR IMMEDIATELY!
+        unblurElement(card);
       }
     }
   }
@@ -552,12 +695,40 @@
   function scanNodeAndSubtree(root) {
     if (!settings.enabled || !compiledRegex || !root) return;
 
+    // If inside our own overlay or ignore element, ignore completely
+    if (root.nodeType === Node.ELEMENT_NODE && (root.hasAttribute('data-nospoiler-ignore') || root.closest('[data-nospoiler-ignore="true"]'))) {
+      return;
+    }
+    if (root.nodeType === Node.TEXT_NODE && root.parentElement && root.parentElement.closest('[data-nospoiler-ignore="true"]')) {
+      return;
+    }
+
+    // Check if root or its ancestor is a known platform card (YouTube, Twitter, Reddit)
+    if (currentPlatform && currentPlatform.containers) {
+      const selectorQuery = currentPlatform.containers.join(', ');
+      const element = root.nodeType === Node.ELEMENT_NODE ? root : root.parentElement;
+      if (element) {
+        const parentCard = element.closest(selectorQuery);
+        if (parentCard) {
+          inspectCard(parentCard);
+          return;
+        }
+
+        const childCards = element.querySelectorAll ? element.querySelectorAll(selectorQuery) : null;
+        if (childCards && childCards.length > 0) {
+          childCards.forEach(c => inspectCard(c));
+          return;
+        }
+      }
+    }
+
+    // For generic text nodes (non-card websites)
     if (root.nodeType === Node.TEXT_NODE) {
       const parent = root.parentElement;
       if (!parent) return;
       const pTag = parent.tagName.toLowerCase();
       if (['script', 'style', 'noscript', 'svg'].includes(pTag)) return;
-      if (parent.closest('[data-nospoiler-ignore="true"]') || parent.closest('.nospoiler-blurred')) return;
+      if (parent.closest('.nospoiler-blurred')) return;
 
       const text = root.textContent;
       if (text && text.trim().length > 1 && compiledRegex.test(text)) {
@@ -573,36 +744,13 @@
 
     const tag = root.tagName.toLowerCase();
     if (['script', 'style', 'noscript', 'svg', 'iframe'].includes(tag)) return;
-    if (root.hasAttribute('data-nospoiler-ignore') || root.classList.contains('nospoiler-container') || root.closest('.nospoiler-blurred')) return;
-
-    // Check if root is itself a card
-    if (currentPlatform && currentPlatform.containers) {
-      for (const selector of currentPlatform.containers) {
-        try {
-          if (root.matches && root.matches(selector)) {
-            inspectCard(root);
-            return;
-          }
-        } catch (_) {}
-      }
-
-      // Check if root contains cards inside it (e.g. newly loaded row or grid)
-      try {
-        const selectorQuery = currentPlatform.containers.join(', ');
-        const cards = root.querySelectorAll(selectorQuery);
-        if (cards && cards.length > 0) {
-          cards.forEach(card => inspectCard(card));
-          return;
-        }
-      } catch (_) {}
-    }
+    if (root.classList.contains('nospoiler-container') || root.closest('.nospoiler-blurred')) return;
 
     // Fallback: check element attributes (img alt, aria-label, title)
     const alt = root.getAttribute('alt') || '';
     const aria = root.getAttribute('aria-label') || '';
     const title = root.getAttribute('title') || '';
     const attrText = `${alt} ${aria} ${title}`.trim();
-
     if (attrText.length > 0 && compiledRegex.test(attrText)) {
       const container = findBestContainer(root);
       if (container) {
@@ -640,7 +788,6 @@
   }
 
   // Batch process accumulated nodes right before browser paint (16ms / 60fps)
-  let rafId = null;
   function processPendingNodes() {
     rafId = null;
     if (!settings.enabled || !compiledRegex || pendingNodes.size === 0) {
@@ -665,6 +812,13 @@
     }
   }
 
+  // Dedicated scan for YouTube Shorts renderers
+  function scanShorts() {
+    if (!settings.enabled || !compiledRegex) return;
+    const shorts = document.querySelectorAll('ytd-reel-video-renderer');
+    shorts.forEach(s => inspectCard(s));
+  }
+
   // Full DOM scan
   function scanFullDocument() {
     if (!settings.enabled || !compiledRegex) return;
@@ -676,18 +830,16 @@
         const cards = document.querySelectorAll(selectorQuery);
         if (cards && cards.length > 0) {
           cards.forEach(card => inspectCard(card));
-          return;
         }
       } catch (_) {}
     }
 
-    // Special pass for YouTube Shorts active video player
+    // Special pass for YouTube Shorts
     if (window.location.pathname.includes('/shorts')) {
-      const shorts = document.querySelectorAll('ytd-reel-video-renderer');
-      shorts.forEach(s => inspectCard(s));
+      scanShorts();
     }
 
-    // 2. TreeWalker fallback
+    // 2. TreeWalker fallback for generic sites
     const root = document.body || document.documentElement;
     if (!root) return;
 
@@ -730,11 +882,12 @@
           const selectorQuery = currentPlatform.containers.join(', ');
           const unblurred = document.querySelectorAll(selectorQuery);
           unblurred.forEach(card => {
-            if (!card.classList.contains('nospoiler-blurred')) {
-              inspectCard(card);
-            }
+            inspectCard(card);
           });
         } catch (_) {}
+      }
+      if (window.location.pathname.includes('/shorts')) {
+        scanShorts();
       }
     }, 60);
   }, { passive: true });
@@ -742,29 +895,37 @@
   // YouTube Shorts keyboard navigation (ArrowUp, ArrowDown, 'j', 'k', PageDown, PageUp)
   window.addEventListener('keydown', (e) => {
     if (['ArrowDown', 'ArrowUp', 'j', 'k', 'PageDown', 'PageUp'].includes(e.key)) {
-      setTimeout(scanFullDocument, 80);
+      setTimeout(scanFullDocument, 100);
+      setTimeout(scanFullDocument, 350);
     }
   });
 
   // YouTube Shorts wheel navigation
   window.addEventListener('wheel', () => {
     if (window.location.pathname.includes('/shorts')) {
-      setTimeout(scanFullDocument, 100);
+      setTimeout(scanShorts, 100);
+      setTimeout(scanShorts, 350);
     }
   }, { passive: true });
 
   // YouTube SPA Navigation Hooks
   window.addEventListener('yt-navigate-finish', () => {
     setTimeout(scanFullDocument, 80);
+    setTimeout(scanFullDocument, 300);
   });
   window.addEventListener('yt-page-data-updated', () => {
     setTimeout(scanFullDocument, 80);
+    setTimeout(scanFullDocument, 300);
   });
   window.addEventListener('spfdone', () => {
     setTimeout(scanFullDocument, 80);
+    setTimeout(scanFullDocument, 300);
+  });
+  window.addEventListener('popstate', () => {
+    setTimeout(scanFullDocument, 100);
   });
 
-  // Start observing (with attribute monitoring for Shorts is-active toggles)
+  // Start observing (with attribute monitoring for Shorts is-active and id toggles)
   function startObserver() {
     const target = document.documentElement || document;
     observer.observe(target, {
