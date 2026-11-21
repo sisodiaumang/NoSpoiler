@@ -161,11 +161,17 @@
 
     const patterns = validKeywords.map(k => {
       const escaped = escapeRegExp(k);
-      const flexible = escaped.replace(/\s+/g, '\\s+');
-      // Word boundary check: \b matches word boundaries accurately
-      const startBoundary = /^\w/.test(k) ? '\\b' : '';
-      const endBoundary = /\w$/.test(k) ? '\\b' : '';
-      return `${startBoundary}(${flexible})${endBoundary}`;
+      // Allow zero or more whitespace, hyphens, underscores between words/numbers
+      // e.g. "gta 6" matches "gta 6", "gta6", "#gta6", "gta-6", "gta_6", and compounds like "#gta6trailer"
+      const flexible = escaped.replace(/\s+/g, '[\\s\\-_]*');
+
+      // Lookbehind boundary: start of string, whitespace, hashtag, or punctuation
+      const startBoundary = '(?<=^|[\\s#"\'\\(:(\\[{<])';
+
+      // Lookahead boundary: end of string, whitespace, punctuation, or compound suffix
+      const endBoundary = '(?=$|[\\s"\'!?.,;:)}\\]>\\-_])';
+
+      return `${startBoundary}(${flexible}[a-zA-Z0-9_-]*)${endBoundary}`;
     });
 
     try {
@@ -181,8 +187,11 @@
     if (!text || !settings.keywords) return 'Spoiler';
     const lower = text.toLowerCase();
     for (const kw of settings.keywords) {
-      if (kw && lower.includes(kw.toLowerCase())) {
-        return kw;
+      if (kw) {
+        const cleanedKw = kw.toLowerCase().replace(/\s+/g, '');
+        if (lower.includes(kw.toLowerCase()) || lower.includes(cleanedKw)) {
+          return kw;
+        }
       }
     }
     return settings.keywords[0] || 'Spoiler';
