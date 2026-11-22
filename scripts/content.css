@@ -1,8 +1,12 @@
 /* NoSpoiler - Content Styles */
 
-/* Base container styling when blurred */
-.nospoiler-container {
+/* Base container styling when blurred or revealed */
+.nospoiler-container,
+.nospoiler-revealed {
   position: relative !important;
+}
+
+.nospoiler-container {
   overflow: hidden !important;
   isolation: isolate !important;
   contain: paint !important;
@@ -184,6 +188,7 @@
 
 /* Revealed State: overlay hidden, content 100% clear & native */
 .nospoiler-revealed {
+  position: relative !important;
   contain: none !important;
   overflow: visible !important;
 }

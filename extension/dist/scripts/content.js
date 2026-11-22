@@ -626,10 +626,8 @@
       );
       c.classList.add('nospoiler-revealed');
       c.removeAttribute('data-nospoiler-blurred');
-      if (c.dataset.nospoilerSetPosition === 'true') {
-        c.style.position = '';
-        delete c.dataset.nospoilerSetPosition;
-      }
+      // Keep position: relative so any child button (like .nospoiler-rehide-btn) is strictly anchored to this card
+      c.style.position = 'relative';
     });
 
     // 2. Remove all overlays completely from the DOM so they can NEVER intercept player clicks
