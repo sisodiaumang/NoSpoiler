@@ -2,7 +2,7 @@
  * NoSpoiler - Content Script
  * Scans web content & social media feeds, blurring spoilers based on user-defined keywords.
  * Precisely targets individual video cards, tweets, and posts without affecting outer page layouts.
- * Seamlessly handles YouTube Shorts DOM element recycling and infinite scroll.
+ * Seamlessly handles YouTube Shorts and video feed DOM element recycling and infinite scroll.
  */
 
 (() => {
@@ -24,25 +24,29 @@
   let pendingNodes = new Set();
   let rafId = null;
 
+  // Track unique item IDs (video IDs, tweet IDs, post IDs) explicitly revealed by the user
+  // This completely solves DOM element recycling: recycled containers for new videos are fresh!
+  const userRevealedItemIds = new Set();
+
   // Platform-specific container and text selectors
   const PLATFORMS = [
     {
       name: 'youtube',
       match: /youtube\.com/,
       containers: [
-        'ytd-rich-item-renderer',       // Individual home/channel video tile
-        'ytd-rich-grid-media',          // Modern grid media
-        'ytd-video-renderer',           // Search result video
-        'ytd-compact-video-renderer',   // Watch page sidebar related video
-        'ytd-grid-video-renderer',      // Channel tab video
-        'ytd-reel-item-renderer',       // Shorts shelf item (Home/Search)
-        'ytd-reel-video-renderer',      // Full-screen YouTube Shorts video player container
-        'yt-lockup-view-model',         // Modern YouTube lockup item
-        'ytd-rich-grid-slim-media',     // Slim media items
-        'ytd-comment-thread-renderer',  // Individual comment thread
-        'ytd-comment-view-model',       // Single comment
-        'ytd-post-renderer',            // Community post
-        'ytd-playlist-video-renderer',  // Playlist item
+        'ytd-rich-item-renderer',            // Individual home/channel video tile
+        'ytd-rich-grid-media',               // Modern grid media
+        'ytd-video-renderer',                // Search result video
+        'ytd-compact-video-renderer',        // Watch page sidebar related video
+        'ytd-grid-video-renderer',           // Channel tab video
+        'ytd-reel-item-renderer',            // Shorts shelf item (Home/Search)
+        'ytd-reel-video-renderer',           // Full-screen YouTube Shorts video player container
+        'yt-lockup-view-model',              // Modern YouTube lockup item (2024-2026)
+        'ytd-rich-grid-slim-media',          // Slim media items
+        'ytd-comment-thread-renderer',       // Individual comment thread
+        'ytd-comment-view-model',            // Single comment
+        'ytd-post-renderer',                 // Community post
+        'ytd-playlist-video-renderer',       // Playlist item
         'ytd-playlist-panel-video-renderer', // Playlist drawer item
         'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-structured-description"]', // Shorts description panel
         'ytd-engagement-panel-section-list-renderer' // Engagement drawer
@@ -55,7 +59,7 @@
         'ytd-section-list-renderer', 'ytd-item-section-renderer', 'ytd-feed-filter-chip-bar-renderer',
         'yt-chip-cloud-chip-renderer', 'yt-chip-cloud-renderer', 'iron-selector',
         '#page-manager', '#primary', '#secondary', '#columns', '#contents', '#chips-wrapper',
-        '#guide', '#header', '#masthead-container', 'ytd-masthead'
+        '#guide', '#header', '#masthead-container', 'ytd-masthead', '#search-input', '#search-form'
       ]
     },
     {
@@ -141,13 +145,21 @@
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // Sanitize text by stripping URLs so web links (like i.ytimg.com/vi/...) never match keywords
+  // Sanitize text by stripping URLs, queries, and base64 paths so links never trigger false positives
   function cleanText(str) {
     if (!str) return '';
-    return str.replace(/https?:\/\/[^\s]+/gi, ' ').replace(/\/[a-zA-Z0-9_-]+\/[^\s]+/g, ' ').trim();
+    return str
+      .replace(/https?:\/\/[^\s]+/gi, ' ')
+      .replace(/www\.[^\s]+/gi, ' ')
+      .replace(/\/watch\?[^\s]+/gi, ' ')
+      .replace(/\/shorts\/[^\s]+/gi, ' ')
+      .replace(/\/[a-zA-Z0-9_-]+\/[^\s]+/g, ' ')
+      .replace(/\b[a-zA-Z0-9+/=]{40,}\b/g, ' ') // Strip base64 tracking blobs
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
-  // Compile keywords into a high-performance single RegExp with robust boundary checks
+  // Compile keywords into a high-performance single RegExp with boundary and hashtag precision
   function compileKeywords(keywords) {
     if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
       return null;
@@ -162,16 +174,20 @@
     const patterns = validKeywords.map(k => {
       const escaped = escapeRegExp(k);
       // Allow zero or more whitespace, hyphens, underscores between words/numbers
-      // e.g. "gta 6" matches "gta 6", "gta6", "#gta6", "gta-6", "gta_6", and compounds like "#gta6trailer"
+      // e.g. "gta 6" matches "gta 6", "gta6", "#gta6", "gta-6", "gta_6"
       const flexible = escaped.replace(/\s+/g, '[\\s\\-_]*');
 
-      // Lookbehind boundary: start of string, whitespace, hashtag, or punctuation
+      // Word boundaries: lookbehind and lookahead
       const startBoundary = '(?<=^|[\\s#"\'\\(:(\\[{<])';
-
-      // Lookahead boundary: end of string, whitespace, punctuation, or compound suffix
       const endBoundary = '(?=$|[\\s"\'!?.,;:)}\\]>\\-_])';
 
-      return `${startBoundary}(${flexible}[a-zA-Z0-9_-]*)${endBoundary}`;
+      // If keyword ends with a digit (e.g. "gta 6", "gta6"), allow compound suffixes like "trailer", "leaks"
+      // If it ends with letters (e.g. "lucia", "gta vi"), only allow light plural/inflection suffixes
+      const endsWithDigit = /\d$/.test(k.trim());
+      const suffix = endsWithDigit ? '[a-zA-Z0-9_-]*' : '(?:s|ed|ing|[0-9_-]+)?';
+
+      // Match either standard boundary-wrapped term OR hashtag compound (e.g. #gta6, #gtavi, #gta6leaks)
+      return `(?:${startBoundary}${flexible}${suffix}${endBoundary}|#${flexible}[a-zA-Z0-9_-]*)`;
     });
 
     try {
@@ -254,6 +270,80 @@
     return true;
   }
 
+  // Extract a stable canonical item ID (video ID, tweet ID, post ID)
+  // This uniquely distinguishes one video/post from another even when DOM nodes are recycled!
+  function getItemIdentifier(card) {
+    if (!card) return null;
+
+    try {
+      // 1. YouTube
+      if (currentPlatform && currentPlatform.name === 'youtube') {
+        const isReel = card.tagName && card.tagName.toLowerCase() === 'ytd-reel-video-renderer';
+        if (isReel) {
+          // If active Short, URL contains the exact video ID
+          if (card.hasAttribute('is-active')) {
+            const m = window.location.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+            if (m) return `yt_short_${m[1]}`;
+          }
+          // Inside the Short container, look for links to the short
+          const shortLink = card.querySelector('a[href*="/shorts/"]');
+          if (shortLink) {
+            const m = (shortLink.getAttribute('href') || '').match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+            if (m) return `yt_short_${m[1]}`;
+          }
+          const reelId = card.getAttribute('id') || card.getAttribute('sequence-number') || '';
+          const headline = card.querySelector('#headline, .title, [class*="title"]');
+          const titleSnippet = headline ? headline.textContent.trim().slice(0, 30) : '';
+          if (titleSnippet) return `yt_short_${reelId}_${titleSnippet}`;
+        }
+
+        // Standard YouTube video card (watch links)
+        const watchLink = card.querySelector(
+          'a#thumbnail[href*="/watch?v="], a#video-title[href*="/watch?v="], ' +
+          'a#video-title-link[href*="/watch?v="], a[href*="/watch?v="]'
+        );
+        if (watchLink) {
+          const href = watchLink.getAttribute('href') || '';
+          const m = href.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
+          if (m) return `yt_vid_${m[1]}`;
+        }
+
+        // Shorts shelf item on home/search
+        const shelfLink = card.querySelector('a[href*="/shorts/"]');
+        if (shelfLink) {
+          const href = shelfLink.getAttribute('href') || '';
+          const m = href.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+          if (m) return `yt_short_${m[1]}`;
+        }
+      }
+
+      // 2. Twitter / X tweet
+      if (currentPlatform && currentPlatform.name === 'twitter') {
+        const tweetLink = card.querySelector('a[href*="/status/"]');
+        if (tweetLink) {
+          const href = tweetLink.getAttribute('href') || '';
+          const m = href.match(/\/status\/(\d+)/);
+          if (m) return `tw_${m[1]}`;
+        }
+      }
+
+      // 3. Reddit post
+      if (currentPlatform && currentPlatform.name === 'reddit') {
+        const permalink = card.getAttribute('permalink') || card.getAttribute('id');
+        if (permalink) return `rd_${permalink}`;
+        const postLink = card.querySelector('a[data-click-id="body"], a[slot="full-post-link"]');
+        if (postLink) return `rd_${postLink.getAttribute('href')}`;
+      }
+
+      // Fallback: title-based hash (for generic platforms)
+      const titleEl = card.querySelector('#video-title, [id*="video-title"], h1, h2, h3, [data-testid="tweetText"]');
+      const title = titleEl ? titleEl.textContent.trim() : '';
+      if (title.length > 5) return `title_${title.slice(0, 60)}`;
+    } catch (_) {}
+
+    return null;
+  }
+
   // Find the exact individual card/post container to blur
   function findBestContainer(node) {
     const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
@@ -298,18 +388,11 @@
         } catch (_) {}
       }
 
-      // Fallback only to the direct title/block element containing the text (NEVER inside Shorts, drawers, or thumbnails)
-      const tightBlock = element.closest('h1, h2, h3, h4, h5, h6, #video-title, p');
-      if (tightBlock && isValidContainer(tightBlock)) {
-        if (element.closest('ytd-engagement-panel-section-list-renderer, ytd-reel-video-renderer, ytd-shorts, a#thumbnail, ytd-thumbnail')) {
-          return null;
-        }
-        return tightBlock;
-      }
+      // On YouTube/Twitter/Reddit, NEVER blur isolated title tags like #video-title! Always target full cards.
       return null;
     }
 
-    // 2. Generic Card / Post container heuristics (articles, cards)
+    // 2. Generic Card / Post container heuristics for unknown sites
     const genericSelector = 'article, [role="article"], .card, .feed-item, .post-card, li.b_algo';
     try {
       const candidate = element.closest(genericSelector);
@@ -318,7 +401,7 @@
       }
     } catch (_) {}
 
-    // 3. Fallback to nearest block-level text element (NEVER generic div)
+    // 3. Fallback to nearest block-level text element for non-platform blogs/articles
     const blockSelector = 'p, h1, h2, h3, h4, h5, h6, blockquote, figure, li';
     const block = element.closest(blockSelector);
     if (block && isValidContainer(block)) {
@@ -396,6 +479,7 @@
 
     // Mark as blurred with theme
     container.classList.add('nospoiler-container', 'nospoiler-blurred');
+    container.classList.remove('nospoiler-revealed');
     container.classList.add(`nospoiler-blur-${settings.blurIntensity}`);
     container.setAttribute('data-nospoiler-blurred', 'true');
     container.setAttribute('data-nospoiler-theme', theme);
@@ -472,7 +556,7 @@
     } catch (_) {}
   }
 
-  // Completely unblur an element (critical for YouTube Shorts DOM recycling)
+  // Completely unblur an element (critical for YouTube DOM recycling)
   function unblurElement(container) {
     if (!container) return;
 
@@ -524,6 +608,12 @@
   function revealElement(container) {
     if (!container) return;
 
+    // Record this item's ID in userRevealedItemIds so scrolling keeps it revealed
+    const itemId = getItemIdentifier(container) || container.dataset.nospoilerItemId;
+    if (itemId) {
+      userRevealedItemIds.add(itemId);
+    }
+
     // 1. Remove blurred classes and container layout styles from container and any descendants
     const allContainers = [container, ...container.querySelectorAll('.nospoiler-container, [data-nospoiler-blurred]')];
     allContainers.forEach(c => {
@@ -542,11 +632,7 @@
       }
     });
 
-    // Record revealed video src for Shorts so recycled check knows it was user-revealed
-    const video = container.querySelector('video');
-    container.dataset.nospoilerRevealedSrc = video ? (video.currentSrc || video.src || 'revealed') : 'revealed';
-
-    // 2. Remove all overlays completely from the DOM so they can NEVER intercept clicks
+    // 2. Remove all overlays completely from the DOM so they can NEVER intercept player clicks
     const overlays = container.querySelectorAll('.nospoiler-overlay');
     overlays.forEach(ov => ov.remove());
 
@@ -589,7 +675,9 @@
         e.stopPropagation();
         e.preventDefault();
         rehideBtn.remove();
-        delete container.dataset.nospoilerRevealedSrc;
+        if (itemId) {
+          userRevealedItemIds.delete(itemId);
+        }
         container.classList.remove('nospoiler-revealed');
         blurElement(container, extractCardText(container));
       });
@@ -614,7 +702,8 @@
 
   // Remove blur completely from the entire page
   function unblurAll() {
-    const blurred = document.querySelectorAll('.nospoiler-container, [data-nospoiler-blurred]');
+    userRevealedItemIds.clear();
+    const blurred = document.querySelectorAll('.nospoiler-container, [data-nospoiler-blurred], .nospoiler-revealed');
     blurred.forEach(container => {
       unblurElement(container);
     });
@@ -633,16 +722,6 @@
     } catch (_) {}
   }
 
-  // Build a distinct signature for a YouTube Short video inside a ytd-reel-video-renderer
-  function getShortSignature(card) {
-    if (!card) return '';
-    const video = card.querySelector('video');
-    const videoSrc = video ? (video.currentSrc || video.src || '') : '';
-    const cardId = card.getAttribute('id') || '';
-    const textSnippet = extractCardText(card).slice(0, 120);
-    return `${cardId}__${videoSrc.slice(-30)}__${textSnippet}`;
-  }
-
   // Extract clean text from a card without polluting with our own overlay or badge
   function extractCardText(card) {
     if (!card) return '';
@@ -650,11 +729,12 @@
     try {
       const pieces = [];
 
-      // 1. Direct queries for all titles, headers, and attributed text
+      // 1. Direct queries for all titles, headers, and attributed text (including modern Lit view models)
       const titleEls = card.querySelectorAll(
         '#video-title, [id*="video-title"], h1, h2, h3, h4, ' +
         'yt-formatted-string, .yt-core-attributed-string, ' +
-        '.reel-player-header-headline, #headline, ' +
+        '.reel-player-header-headline, #headline, .title, [class*="title"], ' +
+        'shorts-video-title-view-model, yt-lockup-view-model, ' +
         '[data-testid="tweetText"], [data-testid="post-title"], [slot="title"]'
       );
       titleEls.forEach(el => {
@@ -710,61 +790,62 @@
       }
 
       const raw = pieces.join(' ');
-      return cleanText(raw).replace(/\s+/g, ' ');
+      return cleanText(raw);
     } catch (_) {
       return '';
     }
   }
 
-  // Inspect a specific card element (handles YouTube Shorts recycling & infinite scroll)
+  // Inspect a specific card element (handles DOM recycling & infinite scroll)
   function inspectCard(card) {
     if (!card || !settings.enabled || !compiledRegex) return;
     if (card.hasAttribute('data-nospoiler-ignore')) return;
 
-    const isReel = card.tagName.toLowerCase() === 'ytd-reel-video-renderer';
-    const cardSignature = isReel ? getShortSignature(card) : extractCardText(card);
+    // Detect unique item identifier
+    const itemId = getItemIdentifier(card);
+    const prevItemId = card.dataset.nospoilerItemId || null;
 
-    // If card has no readable content yet (DOM still rendering), do nothing
-    if (!cardSignature || cardSignature.length < 2) return;
-
-    const lastSignature = card.dataset.nospoilerSignature;
-    const isBlurred = card.classList.contains('nospoiler-blurred');
-    const isRevealed = card.classList.contains('nospoiler-revealed');
-
-    // If card was revealed by the user:
-    if (isRevealed) {
-      if (!isReel) {
-        // Regular video cards (Home, Search, Channels, Twitter, Reddit) must STAY revealed!
-        return;
-      }
-      // For Shorts: check if it's the exact same Short video that was revealed
-      const video = card.querySelector('video');
-      const currentSrc = video ? (video.currentSrc || video.src || '') : '';
-      if (card.dataset.nospoilerRevealedSrc && card.dataset.nospoilerRevealedSrc === currentSrc) {
-        return;
-      }
-      // New Short video arrived in recycled container: clear revealed state
-      delete card.dataset.nospoilerRevealedSrc;
+    // DOM ELEMENT RECYCLING CHECK:
+    // If this container previously held a different video, completely reset old state!
+    if (itemId && prevItemId && itemId !== prevItemId) {
+      unblurElement(card);
       card.classList.remove('nospoiler-revealed');
+      card.querySelectorAll('.nospoiler-rehide-btn').forEach(b => b.remove());
+      delete card.dataset.nospoilerSignature;
     }
 
-    // If signature hasn't changed at all, state is already up-to-date
-    if (lastSignature === cardSignature) {
+    if (itemId) {
+      card.dataset.nospoilerItemId = itemId;
+    }
+
+    // Check if user previously revealed this specific video/item
+    if (itemId && userRevealedItemIds.has(itemId)) {
+      if (!card.classList.contains('nospoiler-revealed')) {
+        revealElement(card);
+      }
       return;
     }
 
-    // Record the current signature
+    // Extract text from the card
+    const cardText = extractCardText(card);
+    if (!cardText || cardText.length < 2) return;
+
+    // Signature check to avoid redundant DOM writes
+    const cardSignature = `${itemId || ''}__${cardText}`;
+    if (card.dataset.nospoilerSignature === cardSignature) {
+      return;
+    }
     card.dataset.nospoilerSignature = cardSignature;
 
-    // Extract text to check for spoiler keywords
-    const cardText = extractCardText(card);
+    const isBlurred = card.classList.contains('nospoiler-blurred');
+    const isRevealed = card.classList.contains('nospoiler-revealed');
     const hasSpoiler = cardText.length > 0 && compiledRegex.test(cardText);
 
     if (hasSpoiler) {
-      if (!isBlurred && !card.classList.contains('nospoiler-revealed')) {
+      if (!isBlurred && !isRevealed) {
         blurElement(card, cardText);
       } else if (isBlurred) {
-        // Already blurred, update keyword tag if keyword changed
+        // Update tag if needed
         const matched = findMatchedKeyword(cardText);
         const tag = card.querySelector('.nospoiler-keyword');
         if (tag) {
@@ -775,13 +856,13 @@
     } else {
       // Content is clean (no spoiler!)
       if (isBlurred || isRevealed) {
-        // DOM node was recycled from a spoiler to a non-spoiler video: UNBLUR IMMEDIATELY!
+        // Container recycled to an innocent video: UNBLUR IMMEDIATELY!
         unblurElement(card);
       }
     }
   }
 
-  // Scan an added element and all its descendant text nodes
+  // Scan an added element and all its descendant cards
   function scanNodeAndSubtree(root) {
     if (!settings.enabled || !compiledRegex || !root) return;
 
@@ -810,6 +891,9 @@
           return;
         }
       }
+
+      // On platform pages (YouTube/Twitter/Reddit), only cards should be inspected, never loose page headers/inputs!
+      return;
     }
 
     // For generic text nodes (non-card websites)
@@ -938,10 +1022,12 @@
     }
 
     // 2. TreeWalker fallback for generic sites
-    const root = document.body || document.documentElement;
-    if (!root) return;
-
-    scanNodeAndSubtree(root);
+    if (!currentPlatform) {
+      const root = document.body || document.documentElement;
+      if (root) {
+        scanNodeAndSubtree(root);
+      }
+    }
   }
 
   // MutationObserver to catch dynamically loaded content on scroll & Shorts switching
