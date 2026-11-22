@@ -21,7 +21,8 @@
   },
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "offscreen"
   ],
   "background": {
     "service_worker": "dist/scripts/background.js"
@@ -32,6 +33,20 @@
       "js": ["dist/scripts/content.js"],
       "css": ["dist/scripts/content.css"],
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "dist/offscreen.html",
+        "dist/scripts/offscreen.js",
+        "dist/scripts/tesseract.min.js",
+        "dist/scripts/worker.min.js",
+        "dist/scripts/tesseract-core.wasm.js",
+        "dist/scripts/tesseract-core.wasm",
+        "dist/scripts/tessdata/*"
+      ],
+      "matches": ["<all_urls>"]
     }
   ]
 }

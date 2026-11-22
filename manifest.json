@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "NoSpoiler - Smart Keyword & Content Blur",
   "version": "1.0.0",
-  "description": "Blurs posts, videos, images, and text containing keywords you want to avoid across social media and the web.",
+  "description": "Blurs posts, videos, images, and text containing your keywords across social media and the web.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -21,7 +21,8 @@
   },
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "offscreen"
   ],
   "background": {
     "service_worker": "scripts/background.js"
@@ -32,6 +33,20 @@
       "js": ["scripts/content.js"],
       "css": ["scripts/content.css"],
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "offscreen.html",
+        "scripts/offscreen.js",
+        "scripts/tesseract.min.js",
+        "scripts/worker.min.js",
+        "scripts/tesseract-core.wasm.js",
+        "scripts/tesseract-core.wasm",
+        "scripts/tessdata/*"
+      ],
+      "matches": ["<all_urls>"]
     }
   ]
 }

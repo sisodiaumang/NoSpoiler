@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const blurSegmented = document.getElementById('blurSegmented');
   const revealToggle = document.getElementById('revealToggle');
   const muteToggle = document.getElementById('muteToggle');
+  const scanThumbnailsToggle = document.getElementById('scanThumbnailsToggle');
   const rescanBtn = document.getElementById('rescanBtn');
   const presetPills = document.querySelectorAll('.pill-btn');
 
@@ -25,6 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     blurIntensity: 'high',
     revealOnClick: true,
     muteMedia: true,
+    scanThumbnails: true,
     totalBlockedCount: 0
   };
 
@@ -37,6 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         'blurIntensity',
         'revealOnClick',
         'muteMedia',
+        'scanThumbnails',
         'totalBlockedCount'
       ]);
 
@@ -45,6 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (stored.blurIntensity !== undefined) state.blurIntensity = stored.blurIntensity;
       if (stored.revealOnClick !== undefined) state.revealOnClick = stored.revealOnClick;
       if (stored.muteMedia !== undefined) state.muteMedia = stored.muteMedia;
+      if (stored.scanThumbnails !== undefined) state.scanThumbnails = stored.scanThumbnails;
       if (stored.totalBlockedCount !== undefined) state.totalBlockedCount = stored.totalBlockedCount;
 
       renderUI();
@@ -81,6 +85,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Option toggles
     revealToggle.checked = state.revealOnClick;
     muteToggle.checked = state.muteMedia;
+    if (scanThumbnailsToggle) scanThumbnailsToggle.checked = state.scanThumbnails;
 
     // Keywords list
     renderKeywords();
@@ -232,6 +237,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.muteMedia = e.target.checked;
     await chrome.storage.sync.set({ muteMedia: state.muteMedia });
   });
+
+  // Scan Thumbnails toggle
+  if (scanThumbnailsToggle) {
+    scanThumbnailsToggle.addEventListener('change', async (e) => {
+      state.scanThumbnails = e.target.checked;
+      await chrome.storage.sync.set({ scanThumbnails: state.scanThumbnails });
+    });
+  }
 
   // Rescan Page Button
   rescanBtn.addEventListener('click', async () => {

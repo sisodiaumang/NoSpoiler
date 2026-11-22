@@ -16,7 +16,8 @@
     keywords: ["gta 6", "gta vi"],
     blurIntensity: "high", // "medium" | "high" | "blackout"
     revealOnClick: true,
-    muteMedia: true
+    muteMedia: true,
+    scanThumbnails: true
   };
 
   let compiledRegex = null;
@@ -27,6 +28,10 @@
   // Track unique item IDs (video IDs, tweet IDs, post IDs) explicitly revealed by the user
   // This completely solves DOM element recycling: recycled containers for new videos are fresh!
   const userRevealedItemIds = new Set();
+
+  // Cache of scanned thumbnail URLs to recognized OCR text
+  const scannedThumbnailCache = new Map();
+  const inFlightThumbnailScans = new Set();
 
   // Platform-specific container and text selectors
   const PLATFORMS = [
@@ -852,11 +857,115 @@
         }
       }
     } else {
-      // Content is clean (no spoiler!)
+      // Content is clean based on HTML text (no spoiler in title/description!)
       if (isBlurred || isRevealed) {
         // Container recycled to an innocent video: UNBLUR IMMEDIATELY!
         unblurElement(card);
       }
+
+      // If thumbnail OCR is enabled, scan thumbnail image pixels for spoilers
+      if (settings.scanThumbnails && !card.classList.contains('nospoiler-revealed')) {
+        observeCardForThumbnailOcr(card);
+      }
+    }
+  }
+
+  // Viewport-only thumbnail OCR scanner (60fps performance)
+  const thumbnailObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        scanCardThumbnail(entry.target);
+      }
+    });
+  }, { rootMargin: '150px 0px' });
+
+  function observeCardForThumbnailOcr(card) {
+    if (!card || !settings.enabled || !settings.scanThumbnails || !compiledRegex) return;
+    if (card.classList.contains('nospoiler-blurred') || card.classList.contains('nospoiler-revealed')) return;
+
+    thumbnailObserver.observe(card);
+
+    // If card is already in viewport, check immediately
+    try {
+      const rect = card.getBoundingClientRect();
+      if (rect.top < window.innerHeight + 150 && rect.bottom > -150) {
+        scanCardThumbnail(card);
+      }
+    } catch (_) {}
+  }
+
+  function scanCardThumbnail(card) {
+    if (!card || !settings.enabled || !settings.scanThumbnails || !compiledRegex) return;
+    if (card.classList.contains('nospoiler-blurred') || card.classList.contains('nospoiler-revealed')) return;
+
+    // Find the main thumbnail image inside the card
+    const thumbImg = card.querySelector('ytd-thumbnail img, a#thumbnail img, img.yt-core-image, img');
+    if (!thumbImg) return;
+
+    const src = thumbImg.currentSrc || thumbImg.src;
+    if (!src || src.startsWith('data:') || src.includes('avatar') || src.includes('profile')) return;
+
+    // Check memory cache first
+    if (scannedThumbnailCache.has(src)) {
+      const cachedText = scannedThumbnailCache.get(src);
+      if (cachedText && compiledRegex.test(cachedText)) {
+        if (!card.classList.contains('nospoiler-revealed')) {
+          blurElement(card, cachedText);
+        }
+      }
+      return;
+    }
+
+    if (inFlightThumbnailScans.has(src)) return;
+
+    // 1. Fast Path: Native hardware-accelerated TextDetector if supported by Chromium (< 10ms)
+    if ('TextDetector' in window && thumbImg.complete && thumbImg.naturalWidth > 0) {
+      try {
+        const detector = new window.TextDetector();
+        detector.detect(thumbImg).then(results => {
+          if (results && results.length > 0) {
+            const detectedText = results.map(r => r.rawValue || '').join(' ').trim();
+            if (detectedText) {
+              scannedThumbnailCache.set(src, detectedText);
+              if (compiledRegex && compiledRegex.test(detectedText)) {
+                if (!card.classList.contains('nospoiler-revealed')) {
+                  blurElement(card, detectedText);
+                }
+              }
+              return;
+            }
+          }
+          dispatchOffscreenOcr(card, src);
+        }).catch(() => {
+          dispatchOffscreenOcr(card, src);
+        });
+        return;
+      } catch (_) {}
+    }
+
+    dispatchOffscreenOcr(card, src);
+  }
+
+  function dispatchOffscreenOcr(card, src) {
+    if (inFlightThumbnailScans.has(src)) return;
+    inFlightThumbnailScans.add(src);
+
+    try {
+      chrome.runtime.sendMessage({ type: 'OCR_IMAGE', url: src }, (res) => {
+        inFlightThumbnailScans.delete(src);
+        if (chrome.runtime.lastError || !res || !res.success) return;
+
+        const text = res.text || '';
+        scannedThumbnailCache.set(src, text);
+
+        if (text && compiledRegex && compiledRegex.test(text)) {
+          if (!card.classList.contains('nospoiler-revealed')) {
+            blurElement(card, text);
+          }
+        }
+      });
+    } catch (_) {
+      inFlightThumbnailScans.delete(src);
     }
   }
 
@@ -1121,7 +1230,7 @@
 
   // Load settings from storage
   function loadSettings() {
-    chrome.storage.sync.get(['enabled', 'keywords', 'blurIntensity', 'revealOnClick', 'muteMedia'], (res) => {
+    chrome.storage.sync.get(['enabled', 'keywords', 'blurIntensity', 'revealOnClick', 'muteMedia', 'scanThumbnails'], (res) => {
       if (chrome.runtime.lastError) {
         console.warn('[NoSpoiler] Storage get error:', chrome.runtime.lastError);
         return;
@@ -1132,6 +1241,7 @@
       if (res.blurIntensity !== undefined) settings.blurIntensity = res.blurIntensity;
       if (res.revealOnClick !== undefined) settings.revealOnClick = res.revealOnClick;
       if (res.muteMedia !== undefined) settings.muteMedia = res.muteMedia;
+      if (res.scanThumbnails !== undefined) settings.scanThumbnails = res.scanThumbnails;
 
       compiledRegex = compileKeywords(settings.keywords);
 
@@ -1161,6 +1271,7 @@
     if (changes.keywords !== undefined) {
       settings.keywords = changes.keywords.newValue || [];
       compiledRegex = compileKeywords(settings.keywords);
+      scannedThumbnailCache.clear();
       needsFullRescan = true;
     }
 
@@ -1178,6 +1289,13 @@
 
     if (changes.muteMedia !== undefined) {
       settings.muteMedia = changes.muteMedia.newValue;
+    }
+
+    if (changes.scanThumbnails !== undefined) {
+      settings.scanThumbnails = changes.scanThumbnails.newValue;
+      if (settings.scanThumbnails) {
+        needsFullRescan = true;
+      }
     }
 
     if (needsFullRescan) {

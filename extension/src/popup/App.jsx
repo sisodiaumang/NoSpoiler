@@ -111,6 +111,7 @@ export default function App() {
   const [blurIntensity, setBlurIntensity] = useState('high');
   const [revealOnClick, setRevealOnClick] = useState(true);
   const [muteMedia, setMuteMedia] = useState(true);
+  const [scanThumbnails, setScanThumbnails] = useState(true);
   const [tabCount, setTabCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [isScanning, setIsScanning] = useState(false);
@@ -134,6 +135,7 @@ export default function App() {
         'blurIntensity', 
         'revealOnClick', 
         'muteMedia',
+        'scanThumbnails',
         'totalBlockedCount',
         'subscribedPacks'
       ]);
@@ -143,6 +145,7 @@ export default function App() {
       if (saved.blurIntensity !== undefined) setBlurIntensity(saved.blurIntensity);
       if (saved.revealOnClick !== undefined) setRevealOnClick(saved.revealOnClick);
       if (saved.muteMedia !== undefined) setMuteMedia(saved.muteMedia);
+      if (saved.scanThumbnails !== undefined) setScanThumbnails(saved.scanThumbnails);
       if (saved.totalBlockedCount !== undefined) setTotalCount(saved.totalBlockedCount);
       if (saved.subscribedPacks) setSubscribedPacks(saved.subscribedPacks);
 
@@ -420,6 +423,22 @@ export default function App() {
                 onChange={async (e) => {
                   setMuteMedia(e.target.checked);
                   await storage.set({ muteMedia: e.target.checked });
+                }} 
+              />
+            </div>
+
+            {/* Scan Thumbnails (OCR) */}
+            <div className="control-row">
+              <div className="control-desc">
+                <span className="name">Scan Thumbnails (OCR)</span>
+                <span className="desc">Blurs if keyword is inside thumbnail image</span>
+              </div>
+              <input 
+                type="checkbox" 
+                checked={scanThumbnails} 
+                onChange={async (e) => {
+                  setScanThumbnails(e.target.checked);
+                  await storage.set({ scanThumbnails: e.target.checked });
                 }} 
               />
             </div>
